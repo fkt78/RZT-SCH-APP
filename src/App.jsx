@@ -1230,6 +1230,7 @@ const AdminDashboard = ({ db, user }) => {
   const [events, setEvents] = useState([]);
   const [notice, setNotice] = useState("");
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [adminTab, setAdminTab] = useState('schedule'); // 'schedule' or 'grades'
   
   // Modal States
   const [selectedDate, setSelectedDate] = useState(null);
@@ -1394,6 +1395,36 @@ const AdminDashboard = ({ db, user }) => {
   return (
     <div className="h-full overflow-y-auto p-4 pb-20 bg-slate-100">
       
+      {/* タブ切り替え */}
+      <div className="flex gap-2 mb-6">
+        <button
+          onClick={() => setAdminTab('schedule')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold transition ${
+            adminTab === 'schedule'
+              ? 'bg-blue-600 text-white shadow-md'
+              : 'bg-white text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          <Calendar size={18} />
+          スケジュール・出欠管理
+        </button>
+        <button
+          onClick={() => setAdminTab('grades')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold transition ${
+            adminTab === 'grades'
+              ? 'bg-green-600 text-white shadow-md'
+              : 'bg-white text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          <Clipboard size={18} />
+          成績表
+        </button>
+      </div>
+
+      {/* スケジュール管理タブ */}
+      {adminTab === 'schedule' && (
+        <>
+      
       {/* 1. Admin Calendar Area */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-6">
         <div className="flex justify-between items-center mb-4">
@@ -1504,6 +1535,14 @@ const AdminDashboard = ({ db, user }) => {
         })}
       </div>
 
+      </>
+      )}
+
+      {/* 成績表タブ */}
+      {adminTab === 'grades' && (
+        <GradesManagement db={db} />
+      )}
+
       {isEditModalOpen && (
         <EventEditorModal 
           isOpen={isEditModalOpen} 
@@ -1513,6 +1552,298 @@ const AdminDashboard = ({ db, user }) => {
           db={db} 
           user={user} 
         />
+      )}
+    </div>
+  );
+};
+
+// ==========================================
+// 📊 成績表管理
+// ==========================================
+const GradesManagement = ({ db }) => {
+  const [students, setStudents] = useState([]);
+  const [testCategories, setTestCategories] = useState([]);
+  const [testItems, setTestItems] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [selectedItem, setSelectedItem] = useState('');
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [gradeInputs, setGradeInputs] = useState({});
+  const [existingGrades, setExistingGrades] = useState([]);
+
+  // 生徒リストを取得
+  useEffect(() => {
+    const q = collection(db, "students");
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const studentList = [];
+      snapshot.docs.forEach((doc) => {
+        const data = doc.data();
+        let name = null;
+        if (data && typeof data === 'object') {
+          const lastName = data.lastName || data.苗字 || data.姓 || '';
+          const firstName = data.firstName || data.名前 || data.名 || '';
+          const middleName = data.middleName || data.ミドルネーム || '';
+          
+          const nameParts = [];
+          if (lastName) nameParts.push(lastName);
+          if (middleName && middleName.trim() !== '') nameParts.push(middleName);
+          if (firstName) nameParts.push(firstName);
+          
+          if (nameParts.length > 0) {
+            name = nameParts.join(' ');
+          } else if (data.name) {
+            name = data.name;
+          }
+        }
+        
+        if (name && typeof name === 'string' && name.trim() !== '') {
+          studentList.push({ id: doc.id, name: name.trim() });
+        }
+      });
+      
+      studentList.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+      setStudents(studentList);
+    });
+    return () => unsubscribe();
+  }, [db]);
+
+  // テストカテゴリを取得
+  useEffect(() => {
+    const q = collection(db, "test_categories");
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const categories = [];
+      snapshot.docs.forEach(doc => {
+        const data = doc.data();
+        let categoryLabel = null;
+        if (data && typeof data === 'object') {
+          if (data.label) {
+            categoryLabel = data.label;
+          } else if (data.name) {
+            categoryLabel = data.name;
+          } else if (data.key) {
+            categoryLabel = data.key;
+          }
+        }
+        
+        if (categoryLabel && typeof categoryLabel === 'string' && categoryLabel.trim() !== '') {
+          categories.push({ id: doc.id, label: categoryLabel.trim() });
+        }
+      });
+      
+      setTestCategories(categories);
+    });
+    return () => unsubscribe();
+  }, [db]);
+
+  // 種目名を取得
+  useEffect(() => {
+    const q = collection(db, "test_item_names");
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const items = [];
+      snapshot.docs.forEach(doc => {
+        const data = doc.data();
+        let itemName = null;
+        if (data && typeof data === 'object') {
+          if (data.name) {
+            itemName = data.name;
+          } else if (data.label) {
+            itemName = data.label;
+          } else if (data.itemName) {
+            itemName = data.itemName;
+          }
+        }
+        
+        if (itemName && typeof itemName === 'string' && itemName.trim() !== '') {
+          items.push({ id: doc.id, name: itemName.trim() });
+        }
+      });
+      
+      setTestItems(items);
+    });
+    return () => unsubscribe();
+  }, [db]);
+
+  // 既存の成績を取得
+  useEffect(() => {
+    const q = query(collection(db, "grades"), orderBy("date", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const gradeList = snapshot.docs.map(d => ({
+        id: d.id,
+        ...d.data(),
+        date: d.data().date?.toDate()
+      }));
+      setExistingGrades(gradeList);
+    });
+    return () => unsubscribe();
+  }, [db]);
+
+  // 入力値の変更
+  const handleScoreChange = (studentName, value) => {
+    setGradeInputs(prev => ({
+      ...prev,
+      [studentName]: value
+    }));
+  };
+
+  // 一括保存
+  const handleBulkSave = async () => {
+    if (!selectedCategory || !selectedItem) {
+      alert('テストカテゴリと種目名を選択してください');
+      return;
+    }
+
+    const entries = Object.entries(gradeInputs).filter(([_, score]) => score && score.trim() !== '');
+    
+    if (entries.length === 0) {
+      alert('少なくとも1つの成績を入力してください');
+      return;
+    }
+
+    if (!window.confirm(`${entries.length}件の成績を保存しますか？`)) {
+      return;
+    }
+
+    try {
+      const batch = writeBatch(db);
+      
+      entries.forEach(([studentName, score]) => {
+        const docRef = doc(collection(db, "grades"));
+        batch.set(docRef, {
+          studentName,
+          category: selectedCategory,
+          itemName: selectedItem,
+          title: `${selectedCategory} - ${selectedItem}`,
+          score: Number(score),
+          date: new Date(date),
+          createdAt: serverTimestamp()
+        });
+      });
+      
+      await batch.commit();
+      alert(`${entries.length}件の成績を保存しました`);
+      setGradeInputs({});
+    } catch (error) {
+      console.error('成績保存エラー:', error);
+      alert('成績保存エラー: ' + error.message);
+    }
+  };
+
+  return (
+    <div>
+      {/* 条件選択エリア */}
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-6">
+        <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2">
+          <Clipboard size={20} className="text-green-600"/> 成績一括入力
+        </h3>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          <div>
+            <label className="text-sm font-bold text-slate-700 block mb-2">テストカテゴリ</label>
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-green-500"
+            >
+              <option value="">選択してください</option>
+              {testCategories.map(cat => (
+                <option key={cat.id} value={cat.label}>{cat.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-sm font-bold text-slate-700 block mb-2">種目名</label>
+            <select
+              value={selectedItem}
+              onChange={(e) => setSelectedItem(e.target.value)}
+              className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-green-500"
+            >
+              <option value="">選択してください</option>
+              {testItems.map(item => (
+                <option key={item.id} value={item.name}>{item.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-sm font-bold text-slate-700 block mb-2">実施日</label>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-green-500"
+            />
+          </div>
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            onClick={handleBulkSave}
+            disabled={!selectedCategory || !selectedItem}
+            className="flex items-center gap-2 px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-bold shadow-md disabled:bg-slate-300 disabled:cursor-not-allowed"
+          >
+            <Database size={16} />
+            一括保存
+          </button>
+        </div>
+      </div>
+
+      {/* 成績入力表 */}
+      {selectedCategory && selectedItem && (
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+          <h3 className="font-bold text-slate-700 mb-4">
+            {selectedCategory} - {selectedItem}
+          </h3>
+
+          {students.length === 0 ? (
+            <div className="text-center py-10 text-slate-400">
+              生徒が登録されていません
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="bg-slate-50">
+                    <th className="border border-slate-300 px-4 py-3 text-left text-sm font-bold text-slate-700">No.</th>
+                    <th className="border border-slate-300 px-4 py-3 text-left text-sm font-bold text-slate-700">生徒名</th>
+                    <th className="border border-slate-300 px-4 py-3 text-center text-sm font-bold text-slate-700 w-40">点数</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {students.map((student, index) => {
+                    // 既存の成績を確認
+                    const existingGrade = existingGrades.find(g => 
+                      g.studentName === student.name && 
+                      g.category === selectedCategory && 
+                      g.itemName === selectedItem
+                    );
+
+                    return (
+                      <tr key={student.id} className="hover:bg-slate-50">
+                        <td className="border border-slate-300 px-4 py-3 text-sm text-slate-600">
+                          {index + 1}
+                        </td>
+                        <td className="border border-slate-300 px-4 py-3 text-sm font-medium text-slate-800">
+                          {student.name}
+                        </td>
+                        <td className="border border-slate-300 px-4 py-3">
+                          <input
+                            type="number"
+                            value={gradeInputs[student.name] || ''}
+                            onChange={(e) => handleScoreChange(student.name, e.target.value)}
+                            className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-green-500 text-center"
+                            placeholder={existingGrade ? `前回: ${existingGrade.score}` : '点数'}
+                            min="0"
+                            max="100"
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
