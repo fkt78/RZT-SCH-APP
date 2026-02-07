@@ -8,7 +8,7 @@ import { getAuth, signInAnonymously, onAuthStateChanged, signOut, setPersistence
 import { 
   Activity, Calendar, LogOut, Plus, 
   CheckCircle, XCircle, HelpCircle, User, Trash2, MapPin, Clock, 
-  Database, Home, Settings, List, Users, AlertCircle, Clipboard, Edit3, FileText
+  Database, Home, Settings, List, Users, AlertCircle, Clipboard, Edit3, FileText, Award, Sparkles
 } from 'lucide-react';
 
 // --- 1. Firebase Configuration ---
@@ -1045,6 +1045,7 @@ const ParticipationModal = ({ event, onClose, db, user, userProfile }) => {
 // 🛠️ Admin Dashboard (管理者機能強化版)
 // ==========================================
 const AdminDashboard = ({ db, user }) => {
+  const [adminSubTab, setAdminSubTab] = useState('main'); // 'main' | 'grades' 成績表
   const [events, setEvents] = useState([]);
   const [notice, setNotice] = useState("");
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -1212,6 +1213,28 @@ const AdminDashboard = ({ db, user }) => {
   return (
     <div className="h-full overflow-y-auto p-4 pb-20 bg-slate-100">
       
+      {/* 管理者サブタブ: 管理・集計 / 成績表 */}
+      <div className="flex gap-2 mb-4 bg-white rounded-xl p-1 shadow-sm border border-slate-200">
+        <button
+          onClick={() => setAdminSubTab('main')}
+          className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-bold text-sm transition ${adminSubTab === 'main' ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+        >
+          <Settings size={18} /> 管理・集計
+        </button>
+        <button
+          onClick={() => setAdminSubTab('grades')}
+          className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-bold text-sm transition ${adminSubTab === 'grades' ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+        >
+          <Award size={18} /> 成績表
+        </button>
+      </div>
+
+      {adminSubTab === 'grades' && (
+        <AdminGradeSheet db={db} events={events} getUniqueAttendees={getUniqueAttendees} />
+      )}
+
+      {adminSubTab === 'main' && (
+        <>
       {/* 1. Admin Calendar Area */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-6">
         <div className="flex justify-between items-center mb-4">
@@ -1322,6 +1345,9 @@ const AdminDashboard = ({ db, user }) => {
         })}
       </div>
 
+      </>
+      )}
+
       {isEditModalOpen && (
         <EventEditorModal 
           isOpen={isEditModalOpen} 
@@ -1332,6 +1358,495 @@ const AdminDashboard = ({ db, user }) => {
           user={user} 
         />
       )}
+    </div>
+  );
+};
+
+// ==========================================
+// 📊 成績表（管理者用）
+// ==========================================
+const AdminGradeSheet = ({ db, events, getUniqueAttendees }) => {
+  const [filterMonth, setFilterMonth] = useState(null); // null = 全期間
+  const [selectedPerson, setSelectedPerson] = useState(null); // クリックした氏名 → 詳細モーダル用
+
+  const targetEvents = React.useMemo(() => (
+    filterMonth
+      ? events.filter(e => e.start && e.start.getMonth() === filterMonth.getMonth() && e.start.getFullYear() === filterMonth.getFullYear())
+      : events
+  ), [events, filterMonth]);
+
+  // 成績集計: 氏名 -> { name, ok, ng, maybe }
+  const stats = React.useMemo(() => {
+    const map = new Map();
+    targetEvents.forEach(event => {
+      const attendees = getUniqueAttendees(event.attendees || []);
+      attendees.forEach(a => {
+        if (!a?.name) return;
+        if (!map.has(a.name)) map.set(a.name, { name: a.name, ok: 0, ng: 0, maybe: 0 });
+        const row = map.get(a.name);
+        if (a.status === 'ok') row.ok += 1;
+        else if (a.status === 'ng') row.ng += 1;
+        else if (a.status === 'maybe') row.maybe += 1;
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+  }, [targetEvents, getUniqueAttendees]);
+
+  const totalEvents = targetEvents.length;
+
+  const handleCopyCSV = () => {
+    const headers = ["氏名", "参加", "不参加", "未定", "参加率(%)"];
+    const rows = stats.map(s => {
+      const total = s.ok + s.ng + s.maybe;
+      const rate = total > 0 ? Math.round((s.ok / total) * 100) : 0;
+      return [s.name, s.ok, s.ng, s.maybe, rate];
+    });
+    const csv = [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+    navigator.clipboard.writeText(csv).then(() => alert("成績表をクリップボードにコピーしました。Excel等に貼り付けてください。"));
+  };
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
+      <div className="p-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+        <h3 className="font-bold text-slate-700 flex items-center gap-2">
+          <Award size={20} className="text-amber-500"/> 成績表（出欠集計）
+        </h3>
+        <div className="flex items-center gap-2 flex-wrap">
+          <label className="text-xs text-slate-500 font-medium">対象月:</label>
+          <select
+            value={filterMonth ? `${filterMonth.getFullYear()}-${filterMonth.getMonth()}` : 'all'}
+            onChange={e => {
+              const v = e.target.value;
+              if (v === 'all') setFilterMonth(null);
+              else {
+                const [y, m] = v.split('-').map(Number);
+                setFilterMonth(new Date(y, m, 1));
+              }
+            }}
+            className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
+          >
+            <option value="all">全期間</option>
+            {events.length > 0 && (() => {
+              const months = new Set();
+              events.forEach(e => {
+                if (e.start) months.add(`${e.start.getFullYear()}-${e.start.getMonth()}`);
+              });
+              return Array.from(months).sort().map(key => {
+                const [y, m] = key.split('-').map(Number);
+                return <option key={key} value={key}>{y}年{m + 1}月</option>;
+              });
+            })()}
+          </select>
+          <button onClick={handleCopyCSV} className="flex items-center gap-1 text-xs bg-slate-800 text-white px-3 py-2 rounded-lg hover:bg-slate-700">
+            <Clipboard size={14} /> CSVコピー
+          </button>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-slate-50 border-b border-slate-200">
+              <th className="text-left p-3 font-bold text-slate-700">氏名</th>
+              <th className="text-right p-3 font-bold text-green-700">参加</th>
+              <th className="text-right p-3 font-bold text-red-700">不参加</th>
+              <th className="text-right p-3 font-bold text-yellow-700">未定</th>
+              <th className="text-right p-3 font-bold text-slate-700">参加率</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stats.length === 0 ? (
+              <tr><td colSpan={5} className="p-6 text-center text-slate-400">データがありません</td></tr>
+            ) : (
+              stats.map((row, i) => {
+                const total = row.ok + row.ng + row.maybe;
+                const rate = total > 0 ? Math.round((row.ok / total) * 100) : 0;
+                return (
+                  <tr
+                    key={row.name}
+                    className={`border-b border-slate-100 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'} hover:bg-blue-50/50 transition cursor-pointer`}
+                    onClick={() => setSelectedPerson({ name: row.name })}
+                  >
+                    <td className="p-3 font-medium text-slate-800 underline decoration-blue-400 decoration-1 underline-offset-1">{row.name}</td>
+                    <td className="p-3 text-right text-green-700">{row.ok}</td>
+                    <td className="p-3 text-right text-red-600">{row.ng}</td>
+                    <td className="p-3 text-right text-yellow-700">{row.maybe}</td>
+                    <td className="p-3 text-right font-bold text-slate-700">{rate}%</td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+      {totalEvents > 0 && (
+        <div className="p-3 bg-slate-50 text-xs text-slate-500 border-t border-slate-200">
+          対象予定数: {totalEvents}件 {filterMonth && `（${filterMonth.getFullYear()}年${filterMonth.getMonth() + 1}月）`}
+        </div>
+      )}
+
+      {/* 氏名クリック時: 体力測定成績入力ページ */}
+      {selectedPerson && (
+        <FitnessTestModal
+          personName={selectedPerson.name}
+          db={db}
+          onClose={() => setSelectedPerson(null)}
+        />
+      )}
+    </div>
+  );
+};
+
+// 1回分のデータは test_item id をキーに { avg, result }
+const emptyRound = () => ({});
+
+// 体力測定成績モーダル（年4回・Firebase test_items のカテゴリ・名前を表示）
+const FitnessTestModal = ({ personName, db, onClose }) => {
+  const currentYear = new Date().getFullYear();
+  const [year, setYear] = useState(currentYear);
+  const [testItems, setTestItems] = useState([]); // Firebase test_items: { id, category, name, order, ... }
+  const [rounds, setRounds] = useState([{}, {}, {}, {}]); // roundIndex -> { [itemId]: { avg, result } }
+  const [roundDates, setRoundDates] = useState(['', '', '', '']); // 各回の測定日 YYYY-MM-DD
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const docId = React.useMemo(() => {
+    const safe = String(personName).replace(/\s/g, '_').replace(/\//g, '_').replace(/[^\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf_-]/g, '_');
+    return `${year}_${safe}`;
+  }, [year, personName]);
+
+  // Firebase test_items を取得（カテゴリ・名前表示用）
+  useEffect(() => {
+    const loadTestItems = async () => {
+      try {
+        const q = query(
+          collection(db, 'test_items'),
+          orderBy('order', 'asc')
+        );
+        const snap = await getDocs(q);
+        const items = [];
+        snap.docs.forEach(d => {
+          const data = d.data();
+          if (data.isActive !== false) {
+            items.push({
+              id: d.id,
+              category: data.category || '',
+              name: data.name || '',
+              order: data.order ?? 0
+            });
+          }
+        });
+        setTestItems(items);
+      } catch (e) {
+        console.error('test_items 取得エラー:', e);
+        setTestItems([]);
+      }
+    };
+    loadTestItems();
+  }, [db]);
+
+  // 成績データを取得
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      try {
+        const ref = doc(db, 'fitness_results', docId);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          const d = snap.data();
+          const r1 = d.round1 && typeof d.round1 === 'object' ? d.round1 : {};
+          const r2 = d.round2 && typeof d.round2 === 'object' ? d.round2 : {};
+          const r3 = d.round3 && typeof d.round3 === 'object' ? d.round3 : {};
+          const r4 = d.round4 && typeof d.round4 === 'object' ? d.round4 : {};
+          setRounds([r1, r2, r3, r4]);
+          const dates = [
+            d.round1Date ? String(d.round1Date).slice(0, 10) : '',
+            d.round2Date ? String(d.round2Date).slice(0, 10) : '',
+            d.round3Date ? String(d.round3Date).slice(0, 10) : '',
+            d.round4Date ? String(d.round4Date).slice(0, 10) : ''
+          ];
+          setRoundDates(dates);
+        } else {
+          setRounds([{}, {}, {}, {}]);
+          setRoundDates(['', '', '', '']);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+      setLoading(false);
+    };
+    load();
+  }, [db, docId]);
+
+  const handleRoundChange = (roundIndex, itemId, field, value) => {
+    setRounds(prev => {
+      const next = [...prev];
+      const round = { ...(next[roundIndex] || {}) };
+      const item = round[itemId] || { avg: '', result: '' };
+      round[itemId] = { ...item, [field]: value };
+      next[roundIndex] = round;
+      return next;
+    });
+  };
+
+  const getRoundValue = (roundIndex, itemId, field) => {
+    const round = rounds[roundIndex] || {};
+    const item = round[itemId] || {};
+    return item[field] ?? '';
+  };
+
+  const handleRoundDateChange = (roundIndex, value) => {
+    setRoundDates(prev => {
+      const next = [...prev];
+      next[roundIndex] = value;
+      return next;
+    });
+  };
+
+  // Firebase に無くても常に表示する固定項目（身長・体重）
+  const fixedRows = [
+    { id: '_height', category: '身長', name: '' },
+    { id: '_weight', category: '体重', name: '' }
+  ];
+
+  const allRows = [...fixedRows, ...testItems];
+
+  // AI分析
+  const [analysisResult, setAnalysisResult] = useState(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+
+  const handleAiAnalysis = async () => {
+    const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+    if (!apiKey) {
+      alert('AI分析を使うには、.env に VITE_OPENAI_API_KEY を設定してください。');
+      return;
+    }
+    // 入力済みデータをテキストにまとめる
+    const lines = [];
+    lines.push(`${personName} さん ${year}年度 体力測定データ（同年代平均 vs 今回結果）`);
+    lines.push('');
+    allRows.forEach((item) => {
+      const label = item.name ? `${item.category}（${item.name}）` : item.category;
+      const rowData = [];
+      [0, 1, 2, 3].forEach(ri => {
+        const avg = getRoundValue(ri, item.id, 'avg');
+        const res = getRoundValue(ri, item.id, 'result');
+        if (avg || res) rowData.push(`${ri + 1}回目: 平均=${avg || '—'} 今回=${res || '—'}`);
+      });
+      if (rowData.length) lines.push(`${label}: ${rowData.join(', ')}`);
+    });
+    const dataText = lines.join('\n');
+    if (!dataText.trim() || lines.length <= 2) {
+      alert('分析するには、少なくとも1種目以上に数値を入力してください。');
+      return;
+    }
+    setAnalysisLoading(true);
+    setAnalysisResult(null);
+    try {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [
+            {
+              role: 'system',
+              content: `あなたは児童・生徒の体力測定を分析し、その結果を保護者に伝える専門家です。読み手は保護者であり、「お子さんの成長を実感し、喜びや安心を感じてもらう」ことを第一の目的としてください。感動とまではいかなくても、心が温まる・うれしくなるような、EQの高い文章にしてください。
+
+【トーン・文体】
+・温かく、寄り添うような語りかけ。保護者の気持ちに共感しつつ、お子さんの頑張りや成長を具体的に伝える。
+・「〜ですね」「〜がうかがえます」「お子さんの〜が伝わってきます」など、相手を意識した柔らかい表現を使う。
+・良い変化には「うれしいですね」「頼もしいです」「しっかり伸びています」など、喜びや称賛を素直に込める。課題があっても「これからが楽しみです」「次回の伸びに期待できます」など前向きに締める。
+・文字数制限は設けていません。分析できる限り、種目ごとの変化や成長を丁寧に文章で表現してください。短くまとめすぎず、保護者が「わが子の成長」をしっかり感じ取れる長さで書いてください。
+
+【表現のルール】
+・分析の主軸は「前回・前々回との比較（回を追った変化）」とし、信頼しやすい具体的な数値で書く。
+・身長: 例「1回目151cmから2回目151.2cmで2mm伸びています。少しずつ背が伸びている様子がうかがえます。」
+・その他も「1回目○→2回目○で△△しています」のように前回との比較で書く。平均に触れる場合は補足程度に。
+
+【重要：種目ごとの「良い方向」の基準】
+・俊敏性（7mラン）: タイムなので数値が小さいほど良い。4.3→4.1なら「俊敏性は向上している」と書く。「低下」と誤らないこと。
+・身長: 数値が大きい＝伸びている。前回より○cm/○mm伸びている、と表現。
+・筋力（腹筋）・瞬発力（立ち幅跳び・座り幅跳び）: 数値が大きいほど良い。
+・柔軟性（長座体前屈）: 数値が大きいほど良い。
+・その他タイム系: 数値が小さいほど良い。`
+            },
+            {
+              role: 'user',
+              content: dataText
+            }
+          ],
+          max_tokens: 1000,
+          temperature: 0.3
+        })
+      });
+      const json = await res.json();
+      if (json.error) throw new Error(json.error.message || 'APIエラー');
+      const text = json.choices?.[0]?.message?.content?.trim();
+      setAnalysisResult(text || '分析結果を取得できませんでした。');
+    } catch (e) {
+      console.error(e);
+      setAnalysisResult('分析に失敗しました: ' + (e.message || String(e)));
+    }
+    setAnalysisLoading(false);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const ref = doc(db, 'fitness_results', docId);
+      await setDoc(ref, {
+        name: personName,
+        year,
+        round1: rounds[0],
+        round2: rounds[1],
+        round3: rounds[2],
+        round4: rounds[3],
+        round1Date: roundDates[0] || null,
+        round2Date: roundDates[1] || null,
+        round3Date: roundDates[2] || null,
+        round4Date: roundDates[3] || null,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      alert('保存しました。');
+    } catch (e) {
+      alert('保存に失敗しました: ' + e.message);
+    }
+    setSaving(false);
+  };
+
+  if (loading) {
+    return (
+      <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-xl p-8 text-slate-500">読み込み中...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm overflow-y-auto">
+      <div className="bg-white w-full max-w-4xl my-8 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
+        <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-slate-50 flex-shrink-0">
+          <h3 className="font-bold text-slate-800 flex items-center gap-2">
+            <Award size={20} className="text-amber-500"/> {personName} 体力測定成績（年4回）
+          </h3>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-slate-500 font-medium">年度:</label>
+            <select value={year} onChange={e => setYear(Number(e.target.value))} className="border border-slate-300 rounded-lg px-3 py-2 text-sm">
+              {[currentYear, currentYear - 1, currentYear - 2].map(y => <option key={y} value={y}>{y}年</option>)}
+            </select>
+            <button onClick={handleSave} disabled={saving} className="flex items-center gap-1 text-sm bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50">
+              {saving ? '保存中...' : '保存'}
+            </button>
+            <button onClick={handleAiAnalysis} disabled={analysisLoading} className="flex items-center gap-1 text-sm bg-violet-600 text-white px-4 py-2 rounded-lg hover:bg-violet-700 disabled:opacity-50">
+              <Sparkles size={16} /> {analysisLoading ? '分析中...' : 'AI分析'}
+            </button>
+            <button onClick={onClose} className="p-2 rounded-lg text-slate-500 hover:bg-slate-200 hover:text-slate-700">
+              <XCircle size={20} />
+            </button>
+          </div>
+        </div>
+        <div className="overflow-auto flex-1 p-4">
+          {/* 各回の測定日（年4回の体力測定の日付） */}
+          <div className="mb-4 p-3 bg-slate-50 rounded-lg border border-slate-200">
+            <p className="text-xs font-bold text-slate-600 mb-2">各回の測定日（年4回の体力測定を行った日付）</p>
+            <div className="flex flex-wrap gap-4 items-center">
+              {[0, 1, 2, 3].map(ri => (
+                <div key={ri} className="flex items-center gap-2">
+                  <label className="text-sm font-medium text-slate-700">{ri + 1}回目</label>
+                  <input
+                    type="date"
+                    className="border border-slate-300 rounded px-2 py-1.5 text-sm"
+                    value={roundDates[ri]}
+                    onChange={e => handleRoundDateChange(ri, e.target.value)}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <table className="w-full text-sm border-collapse" style={{ minWidth: '600px' }}>
+            <thead>
+              <tr>
+                <th className="border border-slate-300 p-2 bg-slate-100 font-bold text-slate-700 text-left w-36" rowSpan={2}>種目</th>
+                {[1, 2, 3, 4].map(n => (
+                  <th key={n} className="border border-slate-300 p-2 bg-slate-100 font-bold text-slate-700 text-center" colSpan={2}>{n}回目</th>
+                ))}
+              </tr>
+              <tr>
+                {[0, 1, 2, 3].map(ri => (
+                  <React.Fragment key={ri}>
+                    <th className="border border-slate-300 p-1.5 bg-slate-50 text-slate-600 text-center text-xs w-24">同年代平均</th>
+                    <th className="border border-slate-300 p-1.5 bg-blue-50 text-blue-800 font-bold text-center text-xs w-24">今回結果</th>
+                  </React.Fragment>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {/* 身長・体重は Firebase に無くても常に表示 */}
+              {fixedRows.map((item) => (
+                <tr key={item.id}>
+                  <td className="border border-slate-200 p-2 bg-slate-50">
+                    <span className="font-bold text-slate-800 block">{item.category}</span>
+                    {item.name ? <span className="text-xs text-slate-500 block">{item.name}</span> : null}
+                  </td>
+                  {[0, 1, 2, 3].map(ri => (
+                    <React.Fragment key={ri}>
+                      <td className="border border-slate-200 p-1">
+                        <input type="text" inputMode="decimal" className="w-full border border-slate-200 rounded px-2 py-1.5 text-center text-sm" placeholder="—"
+                          value={getRoundValue(ri, item.id, 'avg')} onChange={e => handleRoundChange(ri, item.id, 'avg', e.target.value)} />
+                      </td>
+                      <td className="border border-slate-200 p-1 bg-blue-50/50">
+                        <input type="text" inputMode="decimal" className="w-full border border-blue-200 rounded px-2 py-1.5 text-center text-sm font-medium" placeholder="—"
+                          value={getRoundValue(ri, item.id, 'result')} onChange={e => handleRoundChange(ri, item.id, 'result', e.target.value)} />
+                      </td>
+                    </React.Fragment>
+                  ))}
+                </tr>
+              ))}
+              {/* Firestore test_items の項目 */}
+              {testItems.map((item) => (
+                <tr key={item.id}>
+                  <td className="border border-slate-200 p-2 bg-slate-50">
+                    <span className="font-bold text-slate-800 block">{item.category}</span>
+                    <span className="text-xs text-slate-500 block">{item.name}</span>
+                  </td>
+                  {[0, 1, 2, 3].map(ri => (
+                    <React.Fragment key={ri}>
+                      <td className="border border-slate-200 p-1">
+                        <input type="text" inputMode="decimal" className="w-full border border-slate-200 rounded px-2 py-1.5 text-center text-sm" placeholder="—"
+                          value={getRoundValue(ri, item.id, 'avg')} onChange={e => handleRoundChange(ri, item.id, 'avg', e.target.value)} />
+                      </td>
+                      <td className="border border-slate-200 p-1 bg-blue-50/50">
+                        <input type="text" inputMode="decimal" className="w-full border border-blue-200 rounded px-2 py-1.5 text-center text-sm font-medium" placeholder="—"
+                          value={getRoundValue(ri, item.id, 'result')} onChange={e => handleRoundChange(ri, item.id, 'result', e.target.value)} />
+                      </td>
+                    </React.Fragment>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-xs text-slate-400 mt-3">※ 身長・体重は常に表示。その他は Firestore の test_items から取得しています。同年代平均は参考値、今回結果はその回の測定値を入力してください。</p>
+
+          {/* AI分析結果 */}
+          {(analysisResult || analysisLoading) && (
+            <div className="mt-6 p-4 rounded-xl border border-violet-200 bg-violet-50/50">
+              <h4 className="font-bold text-slate-700 flex items-center gap-2 mb-2">
+                <Sparkles size={18} className="text-violet-600"/> AI分析
+              </h4>
+              {analysisLoading ? (
+                <p className="text-slate-500">分析中...</p>
+              ) : (
+                <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{analysisResult}</div>
+              )}
+              <p className="text-xs text-slate-400 mt-2">※ 入力データはOpenAI APIに送信されます。APIキーは .env の VITE_OPENAI_API_KEY で設定してください。</p>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };

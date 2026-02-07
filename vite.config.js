@@ -7,7 +7,9 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: [],
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.js',
       manifest: {
         name: 'リズトレカレンダー',
         short_name: 'リズトレカレンダー',
@@ -26,4 +28,9 @@ export default defineConfig({
       }
     })
   ],
+  server: {
+    host: true,   // localhost と ネットワークIP の両方でアクセス可能に
+    port: 3001,   // RZT-SCH-APP 用ポート
+    strictPort: false  // 3001が使用中なら次の空きポートを使用
+  }
 })
