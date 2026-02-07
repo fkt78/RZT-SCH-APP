@@ -1,9 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
   plugins: [
+<<<<<<< HEAD
     react(),
     VitePWA({
       registerType: 'autoUpdate',
@@ -27,6 +27,9 @@ export default defineConfig({
         ]
       }
     })
+=======
+    react()
+>>>>>>> 5668f7961e71e18f5ec454e4a6d7a163a1e2492b
   ],
   server: {
     host: true,   // localhost と ネットワークIP の両方でアクセス可能に

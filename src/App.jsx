@@ -8,7 +8,11 @@ import { getAuth, signInAnonymously, onAuthStateChanged, signOut, setPersistence
 import { 
   Activity, Calendar, LogOut, Plus, 
   CheckCircle, XCircle, HelpCircle, User, Trash2, MapPin, Clock, 
+<<<<<<< HEAD
   Database, Home, Settings, List, Users, AlertCircle, Clipboard, Edit3, FileText, Award, Sparkles
+=======
+  Database, Home, Settings, List, Users, AlertCircle, Clipboard, Edit3, FileText, RefreshCw
+>>>>>>> 5668f7961e71e18f5ec454e4a6d7a163a1e2492b
 } from 'lucide-react';
 
 // --- 1. Firebase Configuration ---
@@ -37,9 +41,35 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('calendar'); // Default to Calendar
+  const [activeTab, setActiveTab] = useState('home'); // Default to Home (掲示板)
   const [showPinCodeModal, setShowPinCodeModal] = useState(false);
   const [pendingInstructorName, setPendingInstructorName] = useState(null);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+
+  // Service Worker の更新を監視
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then((registration) => {
+        // 定期的に更新をチェック（1分ごと）
+        setInterval(() => {
+          registration.update();
+        }, 60 * 1000);
+
+        // 更新が見つかった時
+        registration.addEventListener('updatefound', () => {
+          const newWorker = registration.installing;
+          if (newWorker) {
+            newWorker.addEventListener('statechange', () => {
+              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                // 新しいバージョンが利用可能
+                setUpdateAvailable(true);
+              }
+            });
+          }
+        });
+      });
+    }
+  }, []);
 
   // Auth Observer
   useEffect(() => {
@@ -198,6 +228,29 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
+      {/* 更新通知バナー */}
+      {updateAvailable && (
+        <div className="fixed top-4 right-4 z-50 bg-blue-600 text-white px-4 py-3 rounded-lg shadow-xl flex items-center gap-3 animate-in slide-in-from-top">
+          <AlertCircle size={20} />
+          <div>
+            <div className="font-bold text-sm">新しいバージョンがあります</div>
+            <div className="text-xs opacity-90">更新して最新機能を利用しましょう</div>
+          </div>
+          <button 
+            onClick={() => window.location.reload()}
+            className="bg-white text-blue-600 px-4 py-2 rounded font-bold text-sm hover:bg-blue-50 transition ml-2"
+          >
+            今すぐ更新
+          </button>
+          <button 
+            onClick={() => setUpdateAvailable(false)}
+            className="text-white hover:text-blue-200 transition"
+          >
+            <XCircle size={18} />
+          </button>
+        </div>
+      )}
+
       {/* Sidebar / Bottom Nav */}
       <Navigation 
         activeTab={activeTab} 
@@ -615,18 +668,33 @@ const NavButton = ({ active, onClick, icon, label }) => (
   </button>
 );
 
-const Header = ({ activeTab, userProfile }) => (
-  <header className="bg-white shadow-sm px-4 py-3 flex justify-between items-center z-10">
-    <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-      {activeTab === 'home' && <><List className="text-blue-600"/> 今月の予定・連絡</>}
-      {activeTab === 'calendar' && <><Calendar className="text-blue-600"/> カレンダー</>}
-      {activeTab === 'admin' && <><Users className="text-blue-600"/> 管理・集計</>}
-    </h2>
-    <div className="text-xs text-slate-500 font-bold bg-slate-100 px-3 py-1 rounded-full">
-      {userProfile.name} さん
-    </div>
-  </header>
-);
+const Header = ({ activeTab, userProfile }) => {
+  const handleRefresh = () => {
+    window.location.reload();
+  };
+
+  return (
+    <header className="bg-white shadow-sm px-4 py-3 flex justify-between items-center z-10">
+      <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+        {activeTab === 'home' && <><List className="text-blue-600"/> 今月の予定・連絡</>}
+        {activeTab === 'calendar' && <><Calendar className="text-blue-600"/> カレンダー</>}
+        {activeTab === 'admin' && <><Users className="text-blue-600"/> 管理・集計</>}
+      </h2>
+      <div className="flex items-center gap-2">
+        <button 
+          onClick={handleRefresh}
+          className="text-slate-500 hover:text-blue-600 transition p-2 hover:bg-slate-100 rounded-lg"
+          title="アプリを更新"
+        >
+          <RefreshCw size={18} />
+        </button>
+        <div className="text-xs text-slate-500 font-bold bg-slate-100 px-3 py-1 rounded-full">
+          {userProfile.name} さん
+        </div>
+      </div>
+    </header>
+  );
+};
 
 // --- 4. Main Views ---
 
@@ -768,6 +836,7 @@ const CalendarView = ({ db, user, userProfile }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [events, setEvents] = useState([]);
   const [selectedEvent, setSelectedEvent] = useState(null); // 詳細モーダル用
+  const [historyTab, setHistoryTab] = useState('upcoming'); // 'upcoming' or 'past'
   
   useEffect(() => {
     const q = query(collection(db, "schedules"), orderBy("start"));
@@ -800,12 +869,29 @@ const CalendarView = ({ db, user, userProfile }) => {
       : event.attendees.find((a) => a.name === userProfile?.name)?.status
   );
 
-  const myParticipatingEvents = events
+  // 今日の日付（0時0分0秒）を取得
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // 今後の参加予定（今日以降）
+  const myUpcomingEvents = events
     .filter((e) => getMyStatus(e) === 'ok')
+    .filter((e) => e.start >= today)
     .sort((a, b) => a.start - b.start);
-  const okEventsForAdmin = events
+  const okUpcomingEventsForAdmin = events
     .filter((e) => e.attendees.some((a) => a.status === 'ok'))
+    .filter((e) => e.start >= today)
     .sort((a, b) => a.start - b.start);
+
+  // 過去の参加履歴（今日より前）
+  const myPastEvents = events
+    .filter((e) => getMyStatus(e) === 'ok')
+    .filter((e) => e.start < today)
+    .sort((a, b) => b.start - a.start); // 新しい順
+  const okPastEventsForAdmin = events
+    .filter((e) => e.attendees.some((a) => a.status === 'ok'))
+    .filter((e) => e.start < today)
+    .sort((a, b) => b.start - a.start); // 新しい順
 
   return (
     <div className="flex flex-col h-full pb-16 relative">
@@ -868,70 +954,170 @@ const CalendarView = ({ db, user, userProfile }) => {
 
       {/* 参加予定カード */}
       <div className="p-4 bg-white border-t">
-        <h4 className="font-bold text-slate-700 mb-3 flex items-center gap-2">
-          <CheckCircle size={16} className="text-green-600" />
-          {isAdmin ? "参加予定（全員）" : "参加予定"}
-        </h4>
-        {isAdmin ? (
-          okEventsForAdmin.length === 0 ? (
-            <div className="text-sm text-slate-400">参加予定はありません</div>
-          ) : (
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {okEventsForAdmin.map((event) => {
-                const uniqueNames = Array.from(
-                  new Set(event.attendees.filter((a) => a.status === 'ok').map((a) => a.name))
-                );
-                return (
-                  <button
-                    key={event.id}
-                    onClick={(ev) => handleEventClick(ev, event)}
-                    className="text-left p-3 rounded-lg border border-green-200 bg-green-50 hover:bg-green-100 transition shadow-sm"
-                  >
-                    <div className="text-xs text-green-700 font-bold mb-1">
-                      {event.start.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', weekday: 'short' })}{" "}
-                      {event.start.getHours()}:{String(event.start.getMinutes()).padStart(2, '0')}
-                    </div>
-                    <div className="font-bold text-slate-800 text-sm">{event.title}</div>
-                    <div className="text-xs text-slate-500 mt-1 flex items-center gap-1">
-                      <MapPin size={10} /> {event.location || '場所未定'}
-                    </div>
-                    {uniqueNames.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {uniqueNames.map((name) => (
-                          <span key={name} className="text-[10px] bg-white border border-green-200 text-green-700 px-2 py-0.5 rounded-full">
-                            {name}
-                          </span>
-                        ))}
+        {/* タブ切り替え */}
+        <div className="flex items-center gap-4 mb-4">
+          <h4 className="font-bold text-slate-700 flex items-center gap-2">
+            <CheckCircle size={16} className="text-green-600" />
+            {isAdmin ? "参加状況（全員）" : "参加状況"}
+          </h4>
+          <div className="flex bg-slate-100 rounded p-1 text-sm ml-auto">
+            <button
+              onClick={() => setHistoryTab('upcoming')}
+              className={`px-3 py-1 rounded transition ${
+                historyTab === 'upcoming'
+                  ? 'bg-white text-blue-600 font-bold shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              今後の予定
+            </button>
+            <button
+              onClick={() => setHistoryTab('past')}
+              className={`px-3 py-1 rounded transition ${
+                historyTab === 'past'
+                  ? 'bg-white text-slate-700 font-bold shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              過去の履歴
+            </button>
+          </div>
+        </div>
+
+        {/* 今後の予定タブ */}
+        {historyTab === 'upcoming' && (
+          <>
+            {isAdmin ? (
+              okUpcomingEventsForAdmin.length === 0 ? (
+                <div className="text-sm text-slate-400">今後の参加予定はありません</div>
+              ) : (
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {okUpcomingEventsForAdmin.map((event) => {
+                    const uniqueNames = Array.from(
+                      new Set(event.attendees.filter((a) => a.status === 'ok').map((a) => a.name))
+                    );
+                    return (
+                      <button
+                        key={event.id}
+                        onClick={(ev) => handleEventClick(ev, event)}
+                        className="text-left p-3 rounded-lg border border-green-200 bg-green-50 hover:bg-green-100 transition shadow-sm"
+                      >
+                        <div className="text-xs text-green-700 font-bold mb-1">
+                          {event.start.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', weekday: 'short' })}{" "}
+                          {event.start.getHours()}:{String(event.start.getMinutes()).padStart(2, '0')}
+                        </div>
+                        <div className="font-bold text-slate-800 text-sm">{event.title}</div>
+                        <div className="text-xs text-slate-500 mt-1 flex items-center gap-1">
+                          <MapPin size={10} /> {event.location || '場所未定'}
+                        </div>
+                        {uniqueNames.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {uniqueNames.map((name) => (
+                              <span key={name} className="text-[10px] bg-white border border-green-200 text-green-700 px-2 py-0.5 rounded-full">
+                                {name}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )
+            ) : (
+              myUpcomingEvents.length === 0 ? (
+                <div className="text-sm text-slate-400">今後の参加予定はありません</div>
+              ) : (
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {myUpcomingEvents.map((event) => (
+                    <button
+                      key={event.id}
+                      onClick={(ev) => handleEventClick(ev, event)}
+                      className="text-left p-3 rounded-lg border border-green-200 bg-green-50 hover:bg-green-100 transition shadow-sm"
+                    >
+                      <div className="text-xs text-green-700 font-bold mb-1">
+                        {event.start.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', weekday: 'short' })}{" "}
+                        {event.start.getHours()}:{String(event.start.getMinutes()).padStart(2, '0')}
                       </div>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )
-        ) : (
-          myParticipatingEvents.length === 0 ? (
-            <div className="text-sm text-slate-400">参加予定はありません</div>
-          ) : (
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {myParticipatingEvents.map((event) => (
-                <button
-                  key={event.id}
-                  onClick={(ev) => handleEventClick(ev, event)}
-                  className="text-left p-3 rounded-lg border border-green-200 bg-green-50 hover:bg-green-100 transition shadow-sm"
-                >
-                  <div className="text-xs text-green-700 font-bold mb-1">
-                    {event.start.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', weekday: 'short' })}{" "}
-                    {event.start.getHours()}:{String(event.start.getMinutes()).padStart(2, '0')}
-                  </div>
-                  <div className="font-bold text-slate-800 text-sm">{event.title}</div>
-                  <div className="text-xs text-slate-500 mt-1 flex items-center gap-1">
-                    <MapPin size={10} /> {event.location || '場所未定'}
-                  </div>
-                </button>
-              ))}
-            </div>
-          )
+                      <div className="font-bold text-slate-800 text-sm">{event.title}</div>
+                      <div className="text-xs text-slate-500 mt-1 flex items-center gap-1">
+                        <MapPin size={10} /> {event.location || '場所未定'}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )
+            )}
+          </>
+        )}
+
+        {/* 過去の履歴タブ */}
+        {historyTab === 'past' && (
+          <>
+            {isAdmin ? (
+              okPastEventsForAdmin.length === 0 ? (
+                <div className="text-sm text-slate-400">過去の参加履歴はありません</div>
+              ) : (
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {okPastEventsForAdmin.map((event) => {
+                    const uniqueNames = Array.from(
+                      new Set(event.attendees.filter((a) => a.status === 'ok').map((a) => a.name))
+                    );
+                    return (
+                      <button
+                        key={event.id}
+                        onClick={(ev) => handleEventClick(ev, event)}
+                        className="text-left p-3 rounded-lg border border-slate-300 bg-slate-50 hover:bg-slate-100 transition shadow-sm"
+                      >
+                        <div className="text-xs text-slate-600 font-bold mb-1 flex items-center gap-1">
+                          <span className="bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded text-[10px]">終了</span>
+                          {event.start.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', weekday: 'short' })}{" "}
+                          {event.start.getHours()}:{String(event.start.getMinutes()).padStart(2, '0')}
+                        </div>
+                        <div className="font-bold text-slate-800 text-sm">{event.title}</div>
+                        <div className="text-xs text-slate-500 mt-1 flex items-center gap-1">
+                          <MapPin size={10} /> {event.location || '場所未定'}
+                        </div>
+                        {uniqueNames.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {uniqueNames.map((name) => (
+                              <span key={name} className="text-[10px] bg-white border border-slate-300 text-slate-600 px-2 py-0.5 rounded-full">
+                                {name}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )
+            ) : (
+              myPastEvents.length === 0 ? (
+                <div className="text-sm text-slate-400">過去の参加履歴はありません</div>
+              ) : (
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {myPastEvents.map((event) => (
+                    <button
+                      key={event.id}
+                      onClick={(ev) => handleEventClick(ev, event)}
+                      className="text-left p-3 rounded-lg border border-slate-300 bg-slate-50 hover:bg-slate-100 transition shadow-sm"
+                    >
+                      <div className="text-xs text-slate-600 font-bold mb-1 flex items-center gap-1">
+                        <span className="bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded text-[10px]">終了</span>
+                        {event.start.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', weekday: 'short' })}{" "}
+                        {event.start.getHours()}:{String(event.start.getMinutes()).padStart(2, '0')}
+                      </div>
+                      <div className="font-bold text-slate-800 text-sm">{event.title}</div>
+                      <div className="text-xs text-slate-500 mt-1 flex items-center gap-1">
+                        <MapPin size={10} /> {event.location || '場所未定'}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )
+            )}
+          </>
         )}
       </div>
       
@@ -1049,6 +1235,7 @@ const AdminDashboard = ({ db, user }) => {
   const [events, setEvents] = useState([]);
   const [notice, setNotice] = useState("");
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [adminTab, setAdminTab] = useState('schedule'); // 'schedule' or 'grades'
   
   // Modal States
   const [selectedDate, setSelectedDate] = useState(null);
@@ -1213,6 +1400,7 @@ const AdminDashboard = ({ db, user }) => {
   return (
     <div className="h-full overflow-y-auto p-4 pb-20 bg-slate-100">
       
+<<<<<<< HEAD
       {/* 管理者サブタブ: 管理・集計 / 成績表 */}
       <div className="flex gap-2 mb-4 bg-white rounded-xl p-1 shadow-sm border border-slate-200">
         <button
@@ -1235,6 +1423,38 @@ const AdminDashboard = ({ db, user }) => {
 
       {adminSubTab === 'main' && (
         <>
+=======
+      {/* タブ切り替え */}
+      <div className="flex gap-2 mb-6">
+        <button
+          onClick={() => setAdminTab('schedule')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold transition ${
+            adminTab === 'schedule'
+              ? 'bg-blue-600 text-white shadow-md'
+              : 'bg-white text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          <Calendar size={18} />
+          スケジュール・出欠管理
+        </button>
+        <button
+          onClick={() => setAdminTab('grades')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold transition ${
+            adminTab === 'grades'
+              ? 'bg-green-600 text-white shadow-md'
+              : 'bg-white text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          <Clipboard size={18} />
+          成績表
+        </button>
+      </div>
+
+      {/* スケジュール管理タブ */}
+      {adminTab === 'schedule' && (
+        <>
+      
+>>>>>>> 5668f7961e71e18f5ec454e4a6d7a163a1e2492b
       {/* 1. Admin Calendar Area */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-6">
         <div className="flex justify-between items-center mb-4">
@@ -1276,14 +1496,14 @@ const AdminDashboard = ({ db, user }) => {
 
       {/* 3. Notice Editor */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-6">
-        <h3 className="font-bold text-slate-700 mb-2 text-sm flex gap-2"><FileText size={16}/> 掲示板「お読みください」の編集</h3>
+        <h3 className="font-bold text-slate-700 mb-3 text-sm flex gap-2"><FileText size={16}/> 掲示板「お読みください」の編集</h3>
         <div className="flex gap-2">
           <textarea 
-            className="flex-1 p-2 border rounded text-xs h-16 focus:outline-none focus:ring-2 focus:ring-blue-500" 
+            className="flex-1 p-3 border rounded text-sm h-32 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" 
             value={notice} onChange={e => setNotice(e.target.value)} 
             placeholder="今月の連絡事項を入力..." 
           />
-          <button onClick={handleUpdateNotice} className="bg-slate-800 text-white px-4 py-2 rounded text-xs hover:bg-slate-700 h-16">更新</button>
+          <button onClick={handleUpdateNotice} className="bg-slate-800 text-white px-6 py-2 rounded text-sm hover:bg-slate-700 h-32 font-bold">更新</button>
         </div>
       </div>
 
@@ -1348,6 +1568,14 @@ const AdminDashboard = ({ db, user }) => {
       </>
       )}
 
+<<<<<<< HEAD
+=======
+      {/* 成績表タブ */}
+      {adminTab === 'grades' && (
+        <GradesManagement db={db} />
+      )}
+
+>>>>>>> 5668f7961e71e18f5ec454e4a6d7a163a1e2492b
       {isEditModalOpen && (
         <EventEditorModal 
           isOpen={isEditModalOpen} 
@@ -1363,6 +1591,7 @@ const AdminDashboard = ({ db, user }) => {
 };
 
 // ==========================================
+<<<<<<< HEAD
 // 📊 成績表（管理者用）
 // ==========================================
 const AdminGradeSheet = ({ db, events, getUniqueAttendees }) => {
@@ -1847,6 +2076,295 @@ const FitnessTestModal = ({ personName, db, onClose }) => {
           )}
         </div>
       </div>
+=======
+// 📊 成績表管理
+// ==========================================
+const GradesManagement = ({ db }) => {
+  const [students, setStudents] = useState([]);
+  const [testCategories, setTestCategories] = useState([]);
+  const [testItems, setTestItems] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [selectedItem, setSelectedItem] = useState('');
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [gradeInputs, setGradeInputs] = useState({});
+  const [existingGrades, setExistingGrades] = useState([]);
+
+  // 生徒リストを取得
+  useEffect(() => {
+    const q = collection(db, "students");
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const studentList = [];
+      snapshot.docs.forEach((doc) => {
+        const data = doc.data();
+        let name = null;
+        if (data && typeof data === 'object') {
+          const lastName = data.lastName || data.苗字 || data.姓 || '';
+          const firstName = data.firstName || data.名前 || data.名 || '';
+          const middleName = data.middleName || data.ミドルネーム || '';
+          
+          const nameParts = [];
+          if (lastName) nameParts.push(lastName);
+          if (middleName && middleName.trim() !== '') nameParts.push(middleName);
+          if (firstName) nameParts.push(firstName);
+          
+          if (nameParts.length > 0) {
+            name = nameParts.join(' ');
+          } else if (data.name) {
+            name = data.name;
+          }
+        }
+        
+        if (name && typeof name === 'string' && name.trim() !== '') {
+          studentList.push({ id: doc.id, name: name.trim() });
+        }
+      });
+      
+      studentList.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+      setStudents(studentList);
+    });
+    return () => unsubscribe();
+  }, [db]);
+
+  // テストカテゴリを取得
+  useEffect(() => {
+    const q = collection(db, "test_categories");
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const categories = [];
+      snapshot.docs.forEach(doc => {
+        const data = doc.data();
+        let categoryLabel = null;
+        if (data && typeof data === 'object') {
+          if (data.label) {
+            categoryLabel = data.label;
+          } else if (data.name) {
+            categoryLabel = data.name;
+          } else if (data.key) {
+            categoryLabel = data.key;
+          }
+        }
+        
+        if (categoryLabel && typeof categoryLabel === 'string' && categoryLabel.trim() !== '') {
+          categories.push({ id: doc.id, label: categoryLabel.trim() });
+        }
+      });
+      
+      setTestCategories(categories);
+    });
+    return () => unsubscribe();
+  }, [db]);
+
+  // 種目名を取得
+  useEffect(() => {
+    const q = collection(db, "test_item_names");
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const items = [];
+      snapshot.docs.forEach(doc => {
+        const data = doc.data();
+        let itemName = null;
+        if (data && typeof data === 'object') {
+          if (data.name) {
+            itemName = data.name;
+          } else if (data.label) {
+            itemName = data.label;
+          } else if (data.itemName) {
+            itemName = data.itemName;
+          }
+        }
+        
+        if (itemName && typeof itemName === 'string' && itemName.trim() !== '') {
+          items.push({ id: doc.id, name: itemName.trim() });
+        }
+      });
+      
+      setTestItems(items);
+    });
+    return () => unsubscribe();
+  }, [db]);
+
+  // 既存の成績を取得
+  useEffect(() => {
+    const q = query(collection(db, "grades"), orderBy("date", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const gradeList = snapshot.docs.map(d => ({
+        id: d.id,
+        ...d.data(),
+        date: d.data().date?.toDate()
+      }));
+      setExistingGrades(gradeList);
+    });
+    return () => unsubscribe();
+  }, [db]);
+
+  // 入力値の変更
+  const handleScoreChange = (studentName, value) => {
+    setGradeInputs(prev => ({
+      ...prev,
+      [studentName]: value
+    }));
+  };
+
+  // 一括保存
+  const handleBulkSave = async () => {
+    if (!selectedCategory || !selectedItem) {
+      alert('テストカテゴリと種目名を選択してください');
+      return;
+    }
+
+    const entries = Object.entries(gradeInputs).filter(([_, score]) => score && score.trim() !== '');
+    
+    if (entries.length === 0) {
+      alert('少なくとも1つの成績を入力してください');
+      return;
+    }
+
+    if (!window.confirm(`${entries.length}件の成績を保存しますか？`)) {
+      return;
+    }
+
+    try {
+      const batch = writeBatch(db);
+      
+      entries.forEach(([studentName, score]) => {
+        const docRef = doc(collection(db, "grades"));
+        batch.set(docRef, {
+          studentName,
+          category: selectedCategory,
+          itemName: selectedItem,
+          title: `${selectedCategory} - ${selectedItem}`,
+          score: Number(score),
+          date: new Date(date),
+          createdAt: serverTimestamp()
+        });
+      });
+      
+      await batch.commit();
+      alert(`${entries.length}件の成績を保存しました`);
+      setGradeInputs({});
+    } catch (error) {
+      console.error('成績保存エラー:', error);
+      alert('成績保存エラー: ' + error.message);
+    }
+  };
+
+  return (
+    <div>
+      {/* 条件選択エリア */}
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-6">
+        <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2">
+          <Clipboard size={20} className="text-green-600"/> 成績一括入力
+        </h3>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          <div>
+            <label className="text-sm font-bold text-slate-700 block mb-2">テストカテゴリ</label>
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-green-500"
+            >
+              <option value="">選択してください</option>
+              {testCategories.map(cat => (
+                <option key={cat.id} value={cat.label}>{cat.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-sm font-bold text-slate-700 block mb-2">種目名</label>
+            <select
+              value={selectedItem}
+              onChange={(e) => setSelectedItem(e.target.value)}
+              className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-green-500"
+            >
+              <option value="">選択してください</option>
+              {testItems.map(item => (
+                <option key={item.id} value={item.name}>{item.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-sm font-bold text-slate-700 block mb-2">実施日</label>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-green-500"
+            />
+          </div>
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            onClick={handleBulkSave}
+            disabled={!selectedCategory || !selectedItem}
+            className="flex items-center gap-2 px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-bold shadow-md disabled:bg-slate-300 disabled:cursor-not-allowed"
+          >
+            <Database size={16} />
+            一括保存
+          </button>
+        </div>
+      </div>
+
+      {/* 成績入力表 */}
+      {selectedCategory && selectedItem && (
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+          <h3 className="font-bold text-slate-700 mb-4">
+            {selectedCategory} - {selectedItem}
+          </h3>
+
+          {students.length === 0 ? (
+            <div className="text-center py-10 text-slate-400">
+              生徒が登録されていません
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="bg-slate-50">
+                    <th className="border border-slate-300 px-4 py-3 text-left text-sm font-bold text-slate-700">No.</th>
+                    <th className="border border-slate-300 px-4 py-3 text-left text-sm font-bold text-slate-700">生徒名</th>
+                    <th className="border border-slate-300 px-4 py-3 text-center text-sm font-bold text-slate-700 w-40">点数</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {students.map((student, index) => {
+                    // 既存の成績を確認
+                    const existingGrade = existingGrades.find(g => 
+                      g.studentName === student.name && 
+                      g.category === selectedCategory && 
+                      g.itemName === selectedItem
+                    );
+
+                    return (
+                      <tr key={student.id} className="hover:bg-slate-50">
+                        <td className="border border-slate-300 px-4 py-3 text-sm text-slate-600">
+                          {index + 1}
+                        </td>
+                        <td className="border border-slate-300 px-4 py-3 text-sm font-medium text-slate-800">
+                          {student.name}
+                        </td>
+                        <td className="border border-slate-300 px-4 py-3">
+                          <input
+                            type="number"
+                            value={gradeInputs[student.name] || ''}
+                            onChange={(e) => handleScoreChange(student.name, e.target.value)}
+                            className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-green-500 text-center"
+                            placeholder={existingGrade ? `前回: ${existingGrade.score}` : '点数'}
+                            min="0"
+                            max="100"
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+>>>>>>> 5668f7961e71e18f5ec454e4a6d7a163a1e2492b
     </div>
   );
 };
@@ -1854,6 +2372,7 @@ const FitnessTestModal = ({ personName, db, onClose }) => {
 const EventEditorModal = ({ isOpen, onClose, event, date, db, user }) => {
   // If event exists, edit mode. Else, create mode.
   const [title, setTitle] = useState(event?.title || 'レッスン');
+  const [locations, setLocations] = useState([]);
   const formatLocalDate = (d) => {
     if (!d) return '';
     const year = d.getFullYear();
@@ -1870,7 +2389,50 @@ const EventEditorModal = ({ isOpen, onClose, event, date, db, user }) => {
   const [endTime, setEndTime] = useState(
     event ? `${String(event.end.getHours()).padStart(2,'0')}:${String(event.end.getMinutes()).padStart(2,'0')}` : '18:00'
   );
-  const [location, setLocation] = useState(event?.location || '市民体育館');
+  const [location, setLocation] = useState(event?.location || '');
+
+  // locationsコレクションからデータを取得
+  useEffect(() => {
+    const q = collection(db, "locations");
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const locationList = [];
+      snapshot.docs.forEach(doc => {
+        const data = doc.data();
+        // 様々なフィールド名から場所名を取得
+        let locationName = null;
+        if (data && typeof data === 'object') {
+          if (data.name) {
+            locationName = data.name;
+          } else if (data.location) {
+            locationName = data.location;
+          } else if (data.場所) {
+            locationName = data.場所;
+          } else if (data.locationName) {
+            locationName = data.locationName;
+          }
+        } else if (typeof data === 'string') {
+          locationName = data;
+        }
+        
+        if (locationName && typeof locationName === 'string' && locationName.trim() !== '') {
+          locationList.push(locationName.trim());
+        }
+      });
+      
+      // 重複を除去してソート
+      const uniqueLocations = [...new Set(locationList)];
+      uniqueLocations.sort((a, b) => a.localeCompare(b, 'ja'));
+      setLocations(uniqueLocations);
+      
+      // デフォルト値設定（新規作成時のみ）
+      if (!event && uniqueLocations.length > 0 && !location) {
+        setLocation(uniqueLocations[0]);
+      }
+    }, (error) => {
+      console.error("場所データ取得エラー:", error);
+    });
+    return () => unsubscribe();
+  }, [db, event, location]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -1927,7 +2489,29 @@ const EventEditorModal = ({ isOpen, onClose, event, date, db, user }) => {
           </div>
           <div>
             <label className="text-xs font-bold text-slate-500">場所</label>
-            <input type="text" value={location} onChange={e=>setLocation(e.target.value)} className="w-full p-2 border rounded" />
+            {locations.length > 0 ? (
+              <select 
+                value={location} 
+                onChange={e=>setLocation(e.target.value)} 
+                className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              >
+                <option value="">選択してください</option>
+                {locations.map((loc, index) => (
+                  <option key={index} value={loc}>
+                    {loc}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input 
+                type="text" 
+                value={location} 
+                onChange={e=>setLocation(e.target.value)} 
+                className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                placeholder="場所を入力..."
+              />
+            )}
           </div>
           <div className="flex gap-2 pt-4">
             <button type="button" onClick={onClose} className="flex-1 py-2 bg-gray-100 rounded text-slate-600">キャンセル</button>
