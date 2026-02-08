@@ -8,8 +8,12 @@ import { getAuth, signInAnonymously, onAuthStateChanged, signOut, setPersistence
 import { 
   Activity, Calendar, LogOut, Plus, 
   CheckCircle, XCircle, HelpCircle, User, Trash2, MapPin, Clock, 
-  Database, Home, Settings, List, Users, AlertCircle, Clipboard, Edit3, FileText, Award, Sparkles, RefreshCw
+  Database, Home, Settings, List, Users, AlertCircle, Clipboard, Edit3, FileText, Award, Sparkles, RefreshCw, BarChart2, TrendingUp
 } from 'lucide-react';
+import {
+  LineChart, Line, BarChart, Bar, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+  ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell
+} from 'recharts';
 
 // --- 1. Firebase Configuration ---
 const firebaseConfig = {
@@ -262,6 +266,7 @@ export default function App() {
         <main className="flex-1 relative bg-slate-100 overflow-hidden">
           {activeTab === 'home' && <HomeBoard db={db} user={user} userProfile={userProfile} />}
           {activeTab === 'calendar' && <CalendarView db={db} user={user} userProfile={userProfile} />}
+          {activeTab === 'grades' && <StudentGradesView db={db} userProfile={userProfile} />}
           {activeTab === 'admin' && userProfile?.role === 'admin' && <AdminDashboard db={db} user={user} />}
           {activeTab === 'admin' && userProfile?.role !== 'admin' && (
             <div className="flex h-full items-center justify-center text-slate-500">
@@ -640,6 +645,7 @@ const Navigation = ({ activeTab, setActiveTab, onLogout, userRole }) => (
     <nav className="flex-1 flex md:flex-col justify-around md:justify-start p-2 md:space-y-2">
       <NavButton active={activeTab === 'home'} onClick={() => setActiveTab('home')} icon={<Home size={24} />} label="掲示板" />
       <NavButton active={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')} icon={<Calendar size={24} />} label="カレンダー" />
+      <NavButton active={activeTab === 'grades'} onClick={() => setActiveTab('grades')} icon={<Award size={24} />} label="成績表" />
       {userRole === 'admin' && (
         <NavButton active={activeTab === 'admin'} onClick={() => setActiveTab('admin')} icon={<Settings size={24} />} label="管理者" />
       )}
@@ -674,6 +680,7 @@ const Header = ({ activeTab, userProfile }) => {
       <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
         {activeTab === 'home' && <><List className="text-blue-600"/> 今月の予定・連絡</>}
         {activeTab === 'calendar' && <><Calendar className="text-blue-600"/> カレンダー</>}
+        {activeTab === 'grades' && <><Award className="text-blue-600"/> 成績表</>}
         {activeTab === 'admin' && <><Users className="text-blue-600"/> 管理・集計</>}
       </h2>
       <div className="flex items-center gap-2">
@@ -1223,6 +1230,369 @@ const ParticipationModal = ({ event, onClose, db, user, userProfile }) => {
   );
 };
 
+// タイム系種目か（数値が小さいほど良い）
+const isTimeItem = (item) => {
+  const n = (item.name || '') + (item.category || '');
+  return /ラン|タイム|秒|mラン/.test(n);
+};
+
+// ==========================================
+// 📈 成績グラフ（折れ線・レーダー・伸びバー）
+// ==========================================
+const StudentGradesCharts = ({ rounds, roundDates, allRows, getRoundValue }) => {
+  const parseNum = (v) => {
+    if (v == null || v === '') return null;
+    const n = Number(String(v).replace(/,/g, ''));
+    return Number.isFinite(n) ? n : null;
+  };
+
+  // 各種目ごとの折れ線用データ（1〜4回目の今回結果）
+  const lineDataByItem = allRows.map((item) => {
+    const label = item.name ? `${item.category}（${item.name}）` : item.category;
+    const points = [0, 1, 2, 3].map((ri) => {
+      const v = parseNum(getRoundValue(ri, item.id, 'result'));
+      return { round: `${ri + 1}回目`, 値: v, label };
+    }).filter((d) => d.値 != null);
+    return { item, label, points };
+  }).filter((d) => d.points.length >= 2);
+
+  // レーダー用：最新回（4回目優先）の「同年代平均との比」スコア（100=平均）
+  const radarData = allRows.map((item) => {
+    const shortLabel = item.name || item.category || item.id;
+    let score = null;
+    for (let ri = 3; ri >= 0; ri--) {
+      const avg = parseNum(getRoundValue(ri, item.id, 'avg'));
+      const res = parseNum(getRoundValue(ri, item.id, 'result'));
+      if (res != null && avg != null && avg !== 0) {
+        score = isTimeItem(item) ? (avg / res) * 100 : (res / avg) * 100;
+        break;
+      }
+    }
+    if (score == null) score = 100;
+    return { subject: shortLabel.length > 6 ? shortLabel.slice(0, 6) : shortLabel, value: Math.round(score), fullMark: 100 };
+  }).filter((d) => d.value > 0 && d.value < 500);
+
+  // 各種目ごとの伸び（1回目→4回目）
+  const growthBarData = allRows.map((item) => {
+    const label = item.name ? `${item.category}（${item.name}）` : item.category;
+    const v1 = parseNum(getRoundValue(0, item.id, 'result'));
+    const v4 = parseNum(getRoundValue(3, item.id, 'result'));
+    if (v1 == null || v4 == null) return null;
+    const delta = isTimeItem(item) ? v1 - v4 : v4 - v1;
+    const fill = delta > 0 ? '#22c55e' : delta < 0 ? '#ef4444' : '#94a3b8';
+    return { name: label.length > 10 ? label.slice(0, 10) + '…' : label, 伸び: delta, fill };
+  }).filter(Boolean);
+
+  return (
+    <div className="space-y-8">
+      {/* 1. 同年代平均との比較（レーダー） */}
+      {radarData.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <h4 className="font-bold text-slate-800 mb-3 flex items-center gap-2">
+            <TrendingUp size={18} className="text-blue-600"/> 最新回の同年代平均との比較（100=平均）
+          </h4>
+          <ResponsiveContainer width="100%" height={320}>
+            <RadarChart data={radarData}>
+              <PolarGrid />
+              <PolarAngleAxis dataKey="subject" tick={{ fontSize: 11 }} />
+              <PolarRadiusAxis angle={90} domain={[0, 150]} tick={{ fontSize: 10 }} />
+              <Radar name="スコア" dataKey="value" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.4} />
+              <Tooltip formatter={(v) => [`${v}（100=平均）`, 'スコア']} />
+            </RadarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* 2. 各種目ごとの伸び（1回目→4回目） */}
+      {growthBarData.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <h4 className="font-bold text-slate-800 mb-3 flex items-center gap-2">
+            <BarChart2 size={18} className="text-emerald-600"/> 各種目ごとの伸び（1回目→4回目）
+          </h4>
+          <p className="text-xs text-slate-500 mb-2">緑=向上・赤=低下。タイム系は短縮を正の伸びで表示しています。</p>
+          <ResponsiveContainer width="100%" height={Math.max(220, growthBarData.length * 36)}>
+            <BarChart data={growthBarData} layout="vertical" margin={{ left: 120, right: 24 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis type="number" tick={{ fontSize: 11 }} />
+              <YAxis type="category" dataKey="name" width={115} tick={{ fontSize: 11 }} />
+              <Tooltip formatter={(v) => [v, '伸び']} labelFormatter={(l) => `種目: ${l}`} />
+              <Bar dataKey="伸び" radius={[0, 4, 4, 0]}>
+                {growthBarData.map((entry, i) => (
+                  <Cell key={i} fill={entry.fill} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* 3. 種目ごとの推移（折れ線） */}
+      {lineDataByItem.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <h4 className="font-bold text-slate-800 mb-3 flex items-center gap-2">
+            <Activity size={18} className="text-violet-600"/> 種目ごとの推移（1〜4回目の今回結果）
+          </h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {lineDataByItem.map(({ item, label, points }) => (
+              <div key={item.id} className="border border-slate-100 rounded-lg p-3 bg-slate-50/50">
+                <p className="text-xs font-bold text-slate-700 mb-2 truncate" title={label}>{label}</p>
+                <ResponsiveContainer width="100%" height={180}>
+                  <LineChart data={points} margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="round" tick={{ fontSize: 10 }} />
+                    <YAxis tick={{ fontSize: 10 }} width={32} />
+                    <Tooltip formatter={(v) => [v, '今回結果']} />
+                    <Line type="monotone" dataKey="値" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 4 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {lineDataByItem.length === 0 && growthBarData.length === 0 && radarData.length === 0 && (
+        <p className="text-slate-500 py-6 text-center">グラフ用の数値データが不足しています。2回分以上の測定結果がある種目から表示されます。</p>
+      )}
+    </div>
+  );
+};
+
+// ==========================================
+// 📊 成績表（生徒向け・本人の体力測定を表示）
+// ==========================================
+const StudentGradesView = ({ db, userProfile }) => {
+  const currentYear = new Date().getFullYear();
+  const [year, setYear] = useState(currentYear);
+  const [gradesSubTab, setGradesSubTab] = useState('table'); // 'table' | 'graph'
+  const [testItems, setTestItems] = useState([]);
+  const [rounds, setRounds] = useState([{}, {}, {}, {}]);
+  const [roundDates, setRoundDates] = useState(['', '', '', '']);
+  const [loading, setLoading] = useState(true);
+
+  const personName = userProfile?.name ?? '';
+  const docId = React.useMemo(() => {
+    if (!personName) return null;
+    const safe = String(personName).replace(/\s/g, '_').replace(/\//g, '_').replace(/[^\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf_-]/g, '_');
+    return `${year}_${safe}`;
+  }, [year, personName]);
+
+  const fixedRows = [
+    { id: '_height', category: '身長', name: '' },
+    { id: '_weight', category: '体重', name: '' }
+  ];
+  const allRows = [...fixedRows, ...testItems];
+
+  const getRoundValue = (roundIndex, itemId, field) => {
+    const round = rounds[roundIndex] || {};
+    const item = round[itemId] || {};
+    return item[field] ?? '';
+  };
+
+  useEffect(() => {
+    const loadTestItems = async () => {
+      try {
+        const q = query(
+          collection(db, 'test_items'),
+          orderBy('order', 'asc')
+        );
+        const snap = await getDocs(q);
+        const items = [];
+        snap.docs.forEach(d => {
+          const data = d.data();
+          if (data.isActive !== false) {
+            items.push({
+              id: d.id,
+              category: data.category || '',
+              name: data.name || '',
+              order: data.order ?? 0
+            });
+          }
+        });
+        setTestItems(items);
+      } catch (e) {
+        console.error('test_items 取得エラー:', e);
+        setTestItems([]);
+      }
+    };
+    loadTestItems();
+  }, [db]);
+
+  useEffect(() => {
+    if (!docId) {
+      setLoading(false);
+      setRounds([{}, {}, {}, {}]);
+      setRoundDates(['', '', '', '']);
+      return;
+    }
+    const load = async () => {
+      setLoading(true);
+      try {
+        const ref = doc(db, 'fitness_results', docId);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          const d = snap.data();
+          const r1 = d.round1 && typeof d.round1 === 'object' ? d.round1 : {};
+          const r2 = d.round2 && typeof d.round2 === 'object' ? d.round2 : {};
+          const r3 = d.round3 && typeof d.round3 === 'object' ? d.round3 : {};
+          const r4 = d.round4 && typeof d.round4 === 'object' ? d.round4 : {};
+          setRounds([r1, r2, r3, r4]);
+          setRoundDates([
+            d.round1Date ? String(d.round1Date).slice(0, 10) : '',
+            d.round2Date ? String(d.round2Date).slice(0, 10) : '',
+            d.round3Date ? String(d.round3Date).slice(0, 10) : '',
+            d.round4Date ? String(d.round4Date).slice(0, 10) : ''
+          ]);
+        } else {
+          setRounds([{}, {}, {}, {}]);
+          setRoundDates(['', '', '', '']);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+      setLoading(false);
+    };
+    load();
+  }, [db, docId]);
+
+  if (!personName) {
+    return (
+      <div className="p-6 bg-white rounded-xl shadow-sm border border-slate-200">
+        <p className="text-slate-500">表示する成績がありません。ログイン名で成績を表示します。</p>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="p-6 bg-white rounded-xl shadow-sm border border-slate-200">
+        <p className="text-slate-500">読み込み中...</p>
+      </div>
+    );
+  }
+
+  const hasAnyData = rounds.some(r => Object.keys(r).length > 0) || roundDates.some(d => d);
+
+  return (
+    <div className="p-4 md:p-6 overflow-auto h-full">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden max-w-4xl mx-auto">
+        <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-3">
+          <h3 className="font-bold text-slate-800 flex items-center gap-2">
+            <Award size={20} className="text-amber-500"/> 体力測定成績（年4回）
+          </h3>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden bg-white">
+              <button
+                type="button"
+                onClick={() => setGradesSubTab('table')}
+                className={`px-4 py-2 text-sm font-medium flex items-center gap-1.5 ${gradesSubTab === 'table' ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+              >
+                <Clipboard size={16} /> 成績表
+              </button>
+              <button
+                type="button"
+                onClick={() => setGradesSubTab('graph')}
+                className={`px-4 py-2 text-sm font-medium flex items-center gap-1.5 ${gradesSubTab === 'graph' ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+              >
+                <BarChart2 size={16} /> 成績グラフ
+              </button>
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <span className="text-slate-600 font-medium">年度:</span>
+              <select
+                value={year}
+                onChange={e => setYear(Number(e.target.value))}
+                className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
+              >
+                {[currentYear, currentYear - 1, currentYear - 2].map(y => (
+                  <option key={y} value={y}>{y}年</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </div>
+        <div className="p-4">
+          {gradesSubTab === 'graph' && hasAnyData ? (
+            <StudentGradesCharts
+              rounds={rounds}
+              roundDates={roundDates}
+              allRows={allRows}
+              getRoundValue={getRoundValue}
+            />
+          ) : !hasAnyData ? (
+            <p className="text-slate-500 py-8 text-center">この年度の体力測定データはまだ登録されていません。管理者が入力するとここに表示されます。</p>
+          ) : (
+            <>
+              {/* 成績表タブ: 測定日 + 表 */}
+              <div className="mb-4 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                <p className="text-xs font-bold text-slate-600 mb-2">各回の測定日</p>
+                <div className="flex flex-wrap gap-4 items-center">
+                  {[0, 1, 2, 3].map(ri => (
+                    <div key={ri} className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-slate-700">{ri + 1}回目</span>
+                      <span className="text-sm text-slate-800">{roundDates[ri] || '—'}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm border-collapse" style={{ minWidth: '600px' }}>
+                  <thead>
+                    <tr>
+                      <th className="border border-slate-300 p-2 bg-slate-100 font-bold text-slate-700 text-left w-36" rowSpan={2}>種目</th>
+                      {[1, 2, 3, 4].map(n => (
+                        <th key={n} className="border border-slate-300 p-2 bg-slate-100 font-bold text-slate-700 text-center" colSpan={2}>{n}回目</th>
+                      ))}
+                    </tr>
+                    <tr>
+                      {[0, 1, 2, 3].map(ri => (
+                        <React.Fragment key={ri}>
+                          <th className="border border-slate-300 p-1.5 bg-slate-50 text-slate-600 text-center text-xs w-24">同年代平均</th>
+                          <th className="border border-slate-300 p-1.5 bg-blue-50 text-blue-800 font-bold text-center text-xs w-24">今回結果</th>
+                        </React.Fragment>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fixedRows.map((item) => (
+                      <tr key={item.id}>
+                        <td className="border border-slate-200 p-2 bg-slate-50">
+                          <span className="font-bold text-slate-800 block">{item.category}</span>
+                          {item.name ? <span className="text-xs text-slate-500 block">{item.name}</span> : null}
+                        </td>
+                        {[0, 1, 2, 3].map(ri => (
+                          <React.Fragment key={ri}>
+                            <td className="border border-slate-200 p-2 text-center text-slate-700">{getRoundValue(ri, item.id, 'avg') || '—'}</td>
+                            <td className="border border-slate-200 p-2 text-center font-medium text-blue-800 bg-blue-50/30">{getRoundValue(ri, item.id, 'result') || '—'}</td>
+                          </React.Fragment>
+                        ))}
+                      </tr>
+                    ))}
+                    {testItems.map((item) => (
+                      <tr key={item.id}>
+                        <td className="border border-slate-200 p-2 bg-slate-50">
+                          <span className="font-bold text-slate-800 block">{item.category}</span>
+                          <span className="text-xs text-slate-500 block">{item.name}</span>
+                        </td>
+                        {[0, 1, 2, 3].map(ri => (
+                          <React.Fragment key={ri}>
+                            <td className="border border-slate-200 p-2 text-center text-slate-700">{getRoundValue(ri, item.id, 'avg') || '—'}</td>
+                            <td className="border border-slate-200 p-2 text-center font-medium text-blue-800 bg-blue-50/30">{getRoundValue(ri, item.id, 'result') || '—'}</td>
+                          </React.Fragment>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ==========================================
 // 🛠️ Admin Dashboard (管理者機能強化版)
 // ==========================================
@@ -1681,10 +2051,52 @@ const AdminGradeSheet = ({ db, events, getUniqueAttendees }) => {
 // 1回分のデータは test_item id をキーに { avg, result }
 const emptyRound = () => ({});
 
+// 生年月日から「その年度の4月1日時点の年齢」を算出（日本の学年基準）
+const getAgeAsOfApril1 = (birthDate, schoolYear) => {
+  if (!birthDate) return null;
+  let date;
+  if (birthDate && typeof birthDate.toDate === 'function') date = birthDate.toDate();
+  else if (typeof birthDate === 'string') date = new Date(birthDate);
+  else if (birthDate instanceof Date) date = birthDate;
+  else return null;
+  if (Number.isNaN(date.getTime())) return null;
+  const april1 = new Date(schoolYear, 3, 1); // 4月1日
+  let age = april1.getFullYear() - date.getFullYear();
+  if (new Date(april1.getFullYear(), date.getMonth(), date.getDate()) > april1) age -= 1;
+  return age >= 0 && age <= 20 ? age : null;
+};
+
+// 4月1日時点の年齢 → 学年（年少/年中/年長/小1〜小6）
+const ageToGrade = (age) => {
+  if (age == null) return '';
+  const map = { 3: '年少', 4: '年中', 5: '年長', 6: '小1', 7: '小2', 8: '小3', 9: '小4', 10: '小5', 11: '小6', 12: '中1', 13: '中2', 14: '中3', 15: '高1', 16: '高2', 17: '高3' };
+  return map[age] ?? '';
+};
+
+// 生徒ドキュメントから表示名を構築（ログイン画面と同じロジック）
+const buildStudentDisplayName = (data) => {
+  if (!data || typeof data !== 'object') return null;
+  const lastName = data.lastName || data.苗字 || data.姓 || '';
+  const firstName = data.firstName || data.名前 || data.名 || '';
+  const middleName = data.middleName || data.ミドルネーム || '';
+  const nameParts = [];
+  if (lastName) nameParts.push(lastName);
+  if (middleName && String(middleName).trim() !== '') nameParts.push(middleName);
+  if (firstName) nameParts.push(firstName);
+  if (nameParts.length > 0) return nameParts.join(' ').trim();
+  if (data.name) return String(data.name).trim();
+  if (data.studentName) return String(data.studentName).trim();
+  if (data.fullName) return String(data.fullName).trim();
+  return null;
+};
+
 // 体力測定成績モーダル（年4回・Firebase test_items のカテゴリ・名前を表示）
 const FitnessTestModal = ({ personName, db, onClose }) => {
   const currentYear = new Date().getFullYear();
   const [year, setYear] = useState(currentYear);
+  const [grade, setGrade] = useState(''); // 学年（同年代平均取得用）: 小6, 小5, 年中, 年長 など
+  const [gradeFromAge, setGradeFromAge] = useState(''); // 年齢から算出した学年（表示・自動設定用）
+  const [itemAveragesFromDb, setItemAveragesFromDb] = useState({}); // itemKey または itemId -> value（Firebase test_item_averages）
   const [testItems, setTestItems] = useState([]); // Firebase test_items: { id, category, name, order, ... }
   const [rounds, setRounds] = useState([{}, {}, {}, {}]); // roundIndex -> { [itemId]: { avg, result } }
   const [roundDates, setRoundDates] = useState(['', '', '', '']); // 各回の測定日 YYYY-MM-DD
@@ -1725,6 +2137,74 @@ const FitnessTestModal = ({ personName, db, onClose }) => {
     };
     loadTestItems();
   }, [db]);
+
+  // 生徒の生年月日から学年を算出し、自動で grade を設定
+  useEffect(() => {
+    if (!personName || !year) return;
+    const load = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'students'));
+        let birthDate = null;
+        for (const d of snap.docs) {
+          const data = d.data();
+          const displayName = buildStudentDisplayName(data);
+          if (!displayName) continue;
+          const normalized = displayName.replace(/\s+/g, ' ').trim();
+          const targetNormalized = String(personName).replace(/\s+/g, ' ').trim();
+          if (normalized === targetNormalized || normalized.includes(targetNormalized) || targetNormalized.includes(normalized)) {
+            birthDate = data.birthDate ?? data.生年月日 ?? data.birthday;
+            break;
+          }
+        }
+        if (!birthDate) {
+          setGradeFromAge('');
+          return;
+        }
+        const age = getAgeAsOfApril1(birthDate, year);
+        const inferredGrade = ageToGrade(age);
+        setGradeFromAge(inferredGrade);
+        if (inferredGrade) setGrade(inferredGrade); // 年齢から算出した学年で自動設定
+      } catch (e) {
+        console.error('生徒の年齢・学年取得エラー:', e);
+        setGradeFromAge('');
+      }
+    };
+    load();
+  }, [db, personName, year]);
+
+  // Firebase test_item_averages から各種目の平均値を取得（学年選択時）
+  useEffect(() => {
+    if (!grade) {
+      setItemAveragesFromDb({});
+      return;
+    }
+    const load = async () => {
+      try {
+        const q = query(
+          collection(db, 'test_item_averages'),
+          where('grade', '==', grade)
+        );
+        const snap = await getDocs(q);
+        const byItemKey = {};  // itemKey (height_male など) -> value
+        const byItemId = {};   // test_item の doc id -> value（doc id が 学年_testItemId のとき）
+        snap.docs.forEach(d => {
+          const data = d.data();
+          const v = data.value != null ? Number(data.value) : null;
+          if (v == null || !Number.isFinite(v)) return;
+          const key = data.itemKey;
+          if (key) byItemKey[key] = v;
+          // doc id が "小6_height_male" のとき suffix は itemKey。 "年中_0qZZ..." のとき suffix は test_item id
+          const suffix = d.id.startsWith(grade + '_') ? d.id.slice(grade.length + 1) : null;
+          if (suffix && suffix !== key) byItemId[suffix] = v;
+        });
+        setItemAveragesFromDb({ byItemKey, byItemId });
+      } catch (e) {
+        console.error('test_item_averages 取得エラー:', e);
+        setItemAveragesFromDb({});
+      }
+    };
+    load();
+  }, [db, grade]);
 
   // 成績データを取得
   useEffect(() => {
@@ -1784,6 +2264,53 @@ const FitnessTestModal = ({ personName, db, onClose }) => {
     });
   };
 
+  // Firebase test_item_averages で読み込んだ同年代平均を、全4回の「同年代平均」欄に一括反映
+  const handleApplyAveragesFromDb = () => {
+    const { byItemKey = {}, byItemId = {} } = itemAveragesFromDb;
+    if (Object.keys(byItemKey).length === 0 && Object.keys(byItemId).length === 0) {
+      alert('学年を選んでから「同年代平均をFirebaseから読み込む」を押すか、先に「同年代平均を読み込む」で取得してください。');
+      return;
+    }
+    const getAvgForItem = (item) => {
+      if (item.id === '_height') {
+        const m = byItemKey['height_male'], f = byItemKey['height_female'];
+        if (m != null && f != null) return String((Number(m) + Number(f)) / 2);
+        if (m != null) return String(m);
+        if (f != null) return String(f);
+        return '';
+      }
+      if (item.id === '_weight') {
+        const m = byItemKey['weight_male'], f = byItemKey['weight_female'];
+        if (m != null && f != null) return String((Number(m) + Number(f)) / 2);
+        if (m != null) return String(m);
+        if (f != null) return String(f);
+        return '';
+      }
+      const v = byItemId[item.id] ?? byItemKey[item.id];
+      return v != null ? String(v) : '';
+    };
+    const fixedRows = [
+      { id: '_height', category: '身長', name: '' },
+      { id: '_weight', category: '体重', name: '' }
+    ];
+    const allRowsForApply = [...fixedRows, ...testItems];
+    setRounds(prev => {
+      const next = prev.map(round => {
+        const nextRound = { ...round };
+        allRowsForApply.forEach(item => {
+          const avg = getAvgForItem(item);
+          if (avg) {
+            const current = nextRound[item.id] || { avg: '', result: '' };
+            nextRound[item.id] = { ...current, avg };
+          }
+        });
+        return nextRound;
+      });
+      return next;
+    });
+    alert('同年代平均をFirebaseの値で反映しました。');
+  };
+
   // Firebase に無くても常に表示する固定項目（身長・体重）
   const fixedRows = [
     { id: '_height', category: '身長', name: '' },
@@ -1804,7 +2331,8 @@ const FitnessTestModal = ({ personName, db, onClose }) => {
     }
     // 入力済みデータをテキストにまとめる
     const lines = [];
-    lines.push(`${personName} さん ${year}年度 体力測定データ（同年代平均 vs 今回結果）`);
+    lines.push(`${personName} さん ${year}年度 体力測定データ`);
+    lines.push('※ 各回の「平均」＝同年代平均（参考値）。「今回」＝対象者本人のその回の測定値。成長の記述は「今回」の値の時系列のみで行うこと。');
     lines.push('');
     allRows.forEach((item) => {
       const label = item.name ? `${item.category}（${item.name}）` : item.category;
@@ -1843,14 +2371,20 @@ const FitnessTestModal = ({ personName, db, onClose }) => {
 ・良い変化には「うれしいですね」「頼もしいです」「しっかり伸びています」など、喜びや称賛を素直に込める。課題があっても「これからが楽しみです」「次回の伸びに期待できます」など前向きに締める。
 ・文字数制限は設けていません。分析できる限り、種目ごとの変化や成長を丁寧に文章で表現してください。短くまとめすぎず、保護者が「わが子の成長」をしっかり感じ取れる長さで書いてください。
 
+【データの意味（必ず守ること）】
+・入力データの「平均」＝同年代平均＝その回の学年・年代の参考値（対象者本人の値ではない）。
+・「今回」＝今回結果＝対象者本人のその回の測定値。
+・「伸びた」「成長した」は、対象者の「今回」の値が1回目→2回目→…と時系列でどう変わったかだけを指す。同年代平均の値を使って「1回目の○○cmから伸びた」と書いてはいけない（平均は本人の過去の値ではない）。
+・「平均より○cm多い/少ない」は、対象者の「今回」の値と「平均」の値を比較した評価。例：4回目で平均156cm・今回162cmなら「平均より6cm高い」であり、「6cm伸びた」ではない。
+
 【表現のルール】
-・分析の主軸は「前回・前々回との比較（回を追った変化）」とし、信頼しやすい具体的な数値で書く。
-・身長: 例「1回目151cmから2回目151.2cmで2mm伸びています。少しずつ背が伸びている様子がうかがえます。」
-・その他も「1回目○→2回目○で△△しています」のように前回との比較で書く。平均に触れる場合は補足程度に。
+・「回を追った変化（成長）」：対象者の「今回」の値だけを使う。例：身長 1回目今回160cm→4回目今回162cm なら「1回目160cmから4回目162cmで2cm伸びています」と書く。平均156cmは成長の計算に使わない。
+・「同年代との比較」：各回または最新回で「今回」と「平均」を比べる。例：「4回目は同年代平均156cmに対し今回結果162cmで、平均より6cm高いです。しっかり成長されています。」
+・身長・体重でも、成長の記述は必ず「今回」の値の時系列で。「平均の値」を本人の1回目の値と混同しないこと。
 
 【重要：種目ごとの「良い方向」の基準】
 ・俊敏性（7mラン）: タイムなので数値が小さいほど良い。4.3→4.1なら「俊敏性は向上している」と書く。「低下」と誤らないこと。
-・身長: 数値が大きい＝伸びている。前回より○cm/○mm伸びている、と表現。
+・身長: 数値が大きい＝伸びている。対象者の「今回」の値の変化で「○cm伸びている」と表現。
 ・筋力（腹筋）・瞬発力（立ち幅跳び・座り幅跳び）: 数値が大きいほど良い。
 ・柔軟性（長座体前屈）: 数値が大きいほど良い。
 ・その他タイム系: 数値が小さいほど良い。`
@@ -1914,11 +2448,24 @@ const FitnessTestModal = ({ personName, db, onClose }) => {
           <h3 className="font-bold text-slate-800 flex items-center gap-2">
             <Award size={20} className="text-amber-500"/> {personName} 体力測定成績（年4回）
           </h3>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <label className="text-xs text-slate-500 font-medium">年度:</label>
             <select value={year} onChange={e => setYear(Number(e.target.value))} className="border border-slate-300 rounded-lg px-3 py-2 text-sm">
               {[currentYear, currentYear - 1, currentYear - 2].map(y => <option key={y} value={y}>{y}年</option>)}
             </select>
+            <label className="text-xs text-slate-500 font-medium">学年（同年代平均）:</label>
+            <select value={grade} onChange={e => setGrade(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm">
+              <option value="">選択</option>
+              {['小6', '小5', '小4', '小3', '年中', '年長', '年少', '中1', '中2', '中3', '高1', '高2', '高3'].map(g => (
+                <option key={g} value={g}>{g}</option>
+              ))}
+            </select>
+            {gradeFromAge && (
+              <span className="text-xs text-slate-500">（年齢から算出）</span>
+            )}
+            <button onClick={handleApplyAveragesFromDb} type="button" className="flex items-center gap-1 text-sm bg-amber-600 text-white px-3 py-2 rounded-lg hover:bg-amber-700">
+              <Database size={14} /> 同年代平均をFirebaseから読み込む
+            </button>
             <button onClick={handleSave} disabled={saving} className="flex items-center gap-1 text-sm bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50">
               {saving ? '保存中...' : '保存'}
             </button>
