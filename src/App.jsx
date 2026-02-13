@@ -1237,6 +1237,22 @@ const isTimeItem = (item) => {
   return /ラン|タイム|mラン/.test(n); // 7mラン・5mランなど「走るタイム」のみ
 };
 
+// 種目ごとの表示用単位（同年代平均・今回結果に表示）。Firebase test_items の unit を優先、なければ種目から推定
+const getUnitForItem = (item) => {
+  const fromFirebase = item.unit != null && String(item.unit).trim() !== '';
+  if (fromFirebase) return String(item.unit).trim();
+  if (item.id === '_height') return 'cm';
+  if (item.id === '_weight') return 'kg';
+  const n = (item.name || '') + (item.category || '');
+  if (/ラン|mラン/.test(n)) return '秒';
+  if (/腹筋/.test(n)) return '回';
+  if (/幅跳び|長座体前屈/.test(n)) return 'cm';
+  if (/プレイズ|反射神経/.test(n)) return '回';
+  if (/片足閉眼|バランス/.test(n)) return '秒';
+  if (/リズム/.test(n)) return '回';
+  return '';
+};
+
 // ==========================================
 // 📈 成績グラフ（折れ線・レーダー・伸びバー）
 // ==========================================
@@ -1550,7 +1566,8 @@ const StudentGradesView = ({ db, userProfile }) => {
               id: d.id,
               category: data.category || '',
               name: data.name || '',
-              order: data.order ?? 0
+              order: data.order ?? 0,
+              unit: data.unit || ''
             });
           }
         });
@@ -1711,34 +1728,42 @@ const StudentGradesView = ({ db, userProfile }) => {
                     </tr>
                   </thead>
                   <tbody>
-                    {fixedRows.map((item) => (
-                      <tr key={item.id}>
-                        <td className="border border-slate-200 p-2 bg-slate-50">
-                          <span className="font-bold text-slate-800 block">{item.category}</span>
-                          {item.name ? <span className="text-xs text-slate-500 block">{item.name}</span> : null}
-                        </td>
-                        {[0, 1, 2, 3].map(ri => (
-                          <React.Fragment key={ri}>
-                            <td className="border border-slate-200 p-2 text-center text-slate-700">{getRoundValue(ri, item.id, 'avg') || '—'}</td>
-                            <td className="border border-slate-200 p-2 text-center font-medium text-blue-800 bg-blue-50/30">{getRoundValue(ri, item.id, 'result') || '—'}</td>
-                          </React.Fragment>
-                        ))}
-                      </tr>
-                    ))}
-                    {testItems.map((item) => (
-                      <tr key={item.id}>
-                        <td className="border border-slate-200 p-2 bg-slate-50">
-                          <span className="font-bold text-slate-800 block">{item.category}</span>
-                          <span className="text-xs text-slate-500 block">{item.name}</span>
-                        </td>
-                        {[0, 1, 2, 3].map(ri => (
-                          <React.Fragment key={ri}>
-                            <td className="border border-slate-200 p-2 text-center text-slate-700">{getRoundValue(ri, item.id, 'avg') || '—'}</td>
-                            <td className="border border-slate-200 p-2 text-center font-medium text-blue-800 bg-blue-50/30">{getRoundValue(ri, item.id, 'result') || '—'}</td>
-                          </React.Fragment>
-                        ))}
-                      </tr>
-                    ))}
+                    {fixedRows.map((item) => {
+                      const unit = getUnitForItem(item);
+                      const unitSuffix = unit ? ` ${unit}` : '';
+                      return (
+                        <tr key={item.id}>
+                          <td className="border border-slate-200 p-2 bg-slate-50">
+                            <span className="font-bold text-slate-800 block">{item.category}{unit ? ` (${unit})` : ''}</span>
+                            {item.name ? <span className="text-xs text-slate-500 block">{item.name}</span> : null}
+                          </td>
+                          {[0, 1, 2, 3].map(ri => (
+                            <React.Fragment key={ri}>
+                              <td className="border border-slate-200 p-2 text-center text-slate-700">{getRoundValue(ri, item.id, 'avg') ? getRoundValue(ri, item.id, 'avg') + unitSuffix : '—'}</td>
+                              <td className="border border-slate-200 p-2 text-center font-medium text-blue-800 bg-blue-50/30">{getRoundValue(ri, item.id, 'result') ? getRoundValue(ri, item.id, 'result') + unitSuffix : '—'}</td>
+                            </React.Fragment>
+                          ))}
+                        </tr>
+                      );
+                    })}
+                    {testItems.map((item) => {
+                      const unit = getUnitForItem(item);
+                      const unitSuffix = unit ? ` ${unit}` : '';
+                      return (
+                        <tr key={item.id}>
+                          <td className="border border-slate-200 p-2 bg-slate-50">
+                            <span className="font-bold text-slate-800 block">{item.category}{unit ? ` (${unit})` : ''}</span>
+                            <span className="text-xs text-slate-500 block">{item.name}</span>
+                          </td>
+                          {[0, 1, 2, 3].map(ri => (
+                            <React.Fragment key={ri}>
+                              <td className="border border-slate-200 p-2 text-center text-slate-700">{getRoundValue(ri, item.id, 'avg') ? getRoundValue(ri, item.id, 'avg') + unitSuffix : '—'}</td>
+                              <td className="border border-slate-200 p-2 text-center font-medium text-blue-800 bg-blue-50/30">{getRoundValue(ri, item.id, 'result') ? getRoundValue(ri, item.id, 'result') + unitSuffix : '—'}</td>
+                            </React.Fragment>
+                          ))}
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -2315,7 +2340,8 @@ const FitnessTestModal = ({ personName, db, onClose }) => {
               id: d.id,
               category: data.category || '',
               name: data.name || '',
-              order: data.order ?? 0
+              order: data.order ?? 0,
+              unit: data.unit || ''
             });
           }
         });
@@ -2524,7 +2550,7 @@ const FitnessTestModal = ({ personName, db, onClose }) => {
     // 入力済みデータをテキストにまとめる
     const lines = [];
     lines.push(`${personName} さん ${year}年度 体力測定データ`);
-    lines.push('※ 各回の「平均」＝同年代平均（参考値）。「今回」＝対象者本人のその回の測定値。成長の記述は「今回」の値の時系列のみで行うこと。');
+    lines.push('【数値の意味】「平均」＝同年代平均（参考値・その子の過去の値ではない）。「今回」＝その子本人のその回の測定値（実測値）。「伸びた／増えた」は必ず「今回」どうしの比較のみ。平均と今回を混ぜて伸びの計算をしないこと。');
     lines.push('');
     allRows.forEach((item) => {
       const label = item.name ? `${item.category}（${item.name}）` : item.category;
@@ -2555,37 +2581,40 @@ const FitnessTestModal = ({ personName, db, onClose }) => {
           messages: [
             {
               role: 'system',
-              content: `あなたは児童・生徒の体力測定を分析し、その結果を保護者に伝える専門家です。読み手は保護者であり、「お子さんの成長を実感し、喜びや安心を感じてもらう」ことを第一の目的としてください。感動とまではいかなくても、心が温まる・うれしくなるような、EQの高い文章にしてください。
+              content: `あなたは児童・生徒の体力測定を分析し、その結果を**お母さん（保護者）に渡す文章**を書く専門家です。読み手は「わが子の様子を知りたいお母さん」です。お母さんが読んで「この子、ここ伸びてるんだな」「ここはこれからだな」と、**感情的にすっと伝わる・心に残る**文章にしてください。EQを高く、子どもに寄り添い、お母さんにも寄り添うトーンで書いてください。
+
+【誰のための文章か】
+・この分析は**お母さんに見せる**ためのものです。お母さんが「うれしい」「安心した」「ここを応援してあげよう」と自然に思えるように、種目ごとの「伸びているところ」と「もう少し伸ばしたいところ」が感情的に伝わるように書いてください。
+・「伸びた種目」では、お母さんが「よく頑張ってる」と誇らしく思えるような、喜びや称賛が伝わる表現を。「ちょっと届いていない種目」では、責めず「これから伸びる余地がある」「次が楽しみ」と前向きに伝え、お母さんが不安になりすぎないようにしてください。
 
 【トーン・文体】
-・温かく、寄り添うような語りかけ。保護者の気持ちに共感しつつ、お子さんの頑張りや成長を具体的に伝える。
-・「〜ですね」「〜がうかがえます」「お子さんの〜が伝わってきます」など、相手を意識した柔らかい表現を使う。
-・良い変化には「うれしいですね」「頼もしいです」「しっかり伸びています」など、喜びや称賛を素直に込める。課題があっても「これからが楽しみです」「次回の伸びに期待できます」など前向きに締める。
-・文字数制限は設けていません。分析できる限り、種目ごとの変化や成長を丁寧に文章で表現してください。短くまとめすぎず、保護者が「わが子の成長」をしっかり感じ取れる長さで書いてください。
+・温かく、寄り添う語りかけ。お母さんの気持ちに共感しつつ、お子さんの頑張りや成長を具体的に伝える。
+・「〜ですね」「〜がうかがえます」「お子さんの〜が伝わってきます」など、相手を意識した柔らかい表現。
+・**伸びている種目**：「しっかり伸びていて頼もしいです」「うれしいですね」「お子さんの〇〇、とても良く頑張っています」など、喜びや称賛が感情的に伝わるように。
+・**課題やまだ伸び余地がある種目**：「もう少し伸ばしたいところ」「これからが楽しみです」「次回の伸びに期待できます」など、責めず前向きに。お母さんが「じゃあここを一緒に楽しもう」と思えるような締めに。
+・文字数制限は設けません。種目ごとの「伸びた／これから」が感情的に伝わるよう、丁寧に書いてください。短くまとめすぎず、お母さんが「わが子の成長」をしっかり感じ取れる長さで。
 
-【データの意味（必ず守ること）】
-・入力データの「平均」＝同年代平均＝その回の学年・年代の参考値（対象者本人の値ではない）。
-・「今回」＝今回結果＝対象者本人のその回の測定値。
+【最重要：平均値と測定値は別物（絶対に混同しないこと）】
+・**平均**＝同年代平均＝「その学年・年代の参考値」であり、**その子の過去の値ではない**。他人の平均なので、「平均から伸びた」という表現は論理的に間違いです。
+・**今回**＝本人の測定値＝「その子自身がその回に計った値」だけを指す。成長や「伸びた」を語るときに使ってよいのは**この「今回」の時系列だけ**です。
+・したがって「1回目の平均」と「4回目の今回」を引き算して「○cm伸びました」と書くのは**禁止**。平均はその子の過去の身長・体重ではないため、伸びの計算に使ってはいけません。
 
-【「伸びている/伸びた」の使い方（厳守）】
-・「伸びている」「伸びた」「○cm伸びています」は、**1回目・2回目・3回目・4回目の「今回」の値どうしの比較**だけに使う。つまり「本人の時系列の変化」のときだけ。
-・同年代平均と今回結果を比べるときに「伸びている」「○cm伸びています」と書いてはならない。誤り例：「1回目の同年代平均127.6cmに対し今回150cm。なんと22.4cmも伸びています」→ これは「平均より22.4cm上回っている」であり「22.4cm伸びた」ではない。
-・正しい使い方の例：「伸びている」＝「1回目今回127cm→4回目今回150cmで23cm伸びています」（本人の1回目と4回目の今回結果の差）。
+【「伸びた／増えた」の使い方（厳守）】
+・「伸びている」「○cm伸びた」「○kg増えた」は、**必ず「今回」だけ**を比較して書く。つまり「1回目の今回」と「4回目の今回」など、**本人の測定値どうし**の差だけ。
+・正しい例：1回目今回127cm・4回目今回160cm → 「1回目127cmから4回目160cmで33cm伸びています」（本人の測定値の時系列のみ）。
+・誤り例：1回目平均127cm・4回目今回160cm を比べて「33cm伸びています」と書くのは禁止。平均は本人の値ではないので、伸びの計算に使わない。
 
-【同年代平均との比較の表現（厳守）】
-・平均と今回結果を比べるときは「平均より○cm高い/上回っています」「平均に比べて上回っています」「同年代平均○cmに対し今回結果○cmで、平均より○cm高いです」などと書く。
-・誤り：「平均より○cm伸びています」「○cmも伸びていますね」（平均との差を「伸び」と言わない）。正：「平均より○cm高いです」「平均に比べて上回っています」。
+【同年代平均との比較（別の言い方で使う）】
+・平均と今回を比べるときは「平均より○cm高いです」「平均に比べて上回っています」「同年代平均○cmに対し今回○cmで、平均より高いです」など。ここでは「伸びた」は使わない。「伸びた」は本人の過去の測定値→今の測定値のときだけ。
 
 【表現のルール】
-・「回を追った変化（成長）」：対象者の「今回」の値だけを使う。例：身長 1回目今回160cm→4回目今回162cm なら「1回目160cmから4回目162cmで2cm伸びています」と書く。平均は成長の記述に使わない。
-・「同年代との比較」：各回または最新回で「今回」と「平均」を比べる。例：「4回目は同年代平均156cmに対し今回結果162cmで、平均より6cm高いです。」「伸びている」は使わない。
-・身長・体重でも、「伸びた」は必ず本人の1回目〜4回目の「今回」の値の時系列だけで使う。「平均の値」を本人の過去の値と混同しないこと。
+・成長・伸びの記述は「今回」の値の時系列のみ。平均値は成長の記述に一切使わない。
+・身長・体重の「伸びた／増えた」も、1回目今回〜4回目今回の**本人の測定値**だけで計算し、平均は使わない。
 
-【重要：種目ごとの「良い方向」の基準】
-・俊敏性（7mラン）: タイムなので数値が小さいほど良い。4.3→4.1なら「俊敏性は向上している」と書く。「低下」と誤らないこと。
-・身長: 数値が大きい＝伸びている。対象者の「今回」の値の変化で「○cm伸びている」と表現。
-・筋力（腹筋）・瞬発力（立ち幅跳び・座り幅跳び）: 数値が大きいほど良い。
-・柔軟性（長座体前屈）: 数値が大きいほど良い。
+【種目ごとの「良い方向」の基準】
+・俊敏性（7mラン等）: タイムは数値が小さいほど良い。
+・身長・体重: 身長は大きい＝成長、体重は文脈に応じて。
+・筋力（腹筋）・瞬発力（立ち幅跳び等）・柔軟性（長座体前屈）: 数値が大きいほど良い。
 ・その他タイム系: 数値が小さいほど良い。`
             },
             {
@@ -2731,53 +2760,71 @@ const FitnessTestModal = ({ personName, db, onClose }) => {
             </thead>
             <tbody>
               {/* 身長・体重は Firebase に無くても常に表示 */}
-              {fixedRows.map((item) => (
-                <tr key={item.id}>
-                  <td className="border border-slate-200 p-2 bg-slate-50">
-                    <span className="font-bold text-slate-800 block">{item.category}</span>
-                    {item.name ? <span className="text-xs text-slate-500 block">{item.name}</span> : null}
-                  </td>
-                  {[0, 1, 2, 3].map(ri => (
-                    <React.Fragment key={ri}>
-                      <td className="border border-slate-200 p-1">
-                        <input type="text" inputMode="decimal" className="w-full border border-slate-200 rounded px-2 py-1.5 text-center text-sm" placeholder="—"
-                          value={getRoundValue(ri, item.id, 'avg')} onChange={e => handleRoundChange(ri, item.id, 'avg', e.target.value)} />
-                      </td>
-                      <td className="border border-slate-200 p-1 bg-blue-50/50">
-                        <input type="text" inputMode="decimal" className="w-full border border-blue-200 rounded px-2 py-1.5 text-center text-sm font-medium" placeholder="—"
-                          value={getRoundValue(ri, item.id, 'result')} onChange={e => handleRoundChange(ri, item.id, 'result', e.target.value)} />
-                      </td>
-                    </React.Fragment>
-                  ))}
-                </tr>
-              ))}
+              {fixedRows.map((item) => {
+                const unit = getUnitForItem(item);
+                return (
+                  <tr key={item.id}>
+                    <td className="border border-slate-200 p-2 bg-slate-50">
+                      <span className="font-bold text-slate-800 block">{item.category}{unit ? ` (${unit})` : ''}</span>
+                      {item.name ? <span className="text-xs text-slate-500 block">{item.name}</span> : null}
+                    </td>
+                    {[0, 1, 2, 3].map(ri => (
+                      <React.Fragment key={ri}>
+                        <td className="border border-slate-200 p-1">
+                          <div className="flex items-center justify-center gap-1">
+                            <input type="text" inputMode="decimal" className="flex-1 min-w-0 border border-slate-200 rounded px-2 py-1.5 text-center text-sm" placeholder="—"
+                              value={getRoundValue(ri, item.id, 'avg')} onChange={e => handleRoundChange(ri, item.id, 'avg', e.target.value)} />
+                            {unit ? <span className="text-slate-500 text-xs shrink-0">{unit}</span> : null}
+                          </div>
+                        </td>
+                        <td className="border border-slate-200 p-1 bg-blue-50/50">
+                          <div className="flex items-center justify-center gap-1">
+                            <input type="text" inputMode="decimal" className="flex-1 min-w-0 border border-blue-200 rounded px-2 py-1.5 text-center text-sm font-medium" placeholder="—"
+                              value={getRoundValue(ri, item.id, 'result')} onChange={e => handleRoundChange(ri, item.id, 'result', e.target.value)} />
+                            {unit ? <span className="text-slate-500 text-xs shrink-0">{unit}</span> : null}
+                          </div>
+                        </td>
+                      </React.Fragment>
+                    ))}
+                  </tr>
+                );
+              })}
               {/* Firestore test_items の項目 */}
-              {testItems.map((item) => (
-                <tr key={item.id}>
-                  <td className="border border-slate-200 p-2 bg-slate-50">
-                    <span className="font-bold text-slate-800 block">{item.category}</span>
-                    <span className="text-xs text-slate-500 block">{item.name}</span>
-                  </td>
-                  {[0, 1, 2, 3].map(ri => (
-                    <React.Fragment key={ri}>
-                      <td className="border border-slate-200 p-1">
-                        <input type="text" inputMode="decimal" className="w-full border border-slate-200 rounded px-2 py-1.5 text-center text-sm" placeholder="—"
-                          value={getRoundValue(ri, item.id, 'avg')} onChange={e => handleRoundChange(ri, item.id, 'avg', e.target.value)} />
-                      </td>
-                      <td className="border border-slate-200 p-1 bg-blue-50/50">
-                        <input type="text" inputMode="decimal" className="w-full border border-blue-200 rounded px-2 py-1.5 text-center text-sm font-medium" placeholder="—"
-                          value={getRoundValue(ri, item.id, 'result')} onChange={e => handleRoundChange(ri, item.id, 'result', e.target.value)} />
-                      </td>
-                    </React.Fragment>
-                  ))}
-                </tr>
-              ))}
+              {testItems.map((item) => {
+                const unit = getUnitForItem(item);
+                return (
+                  <tr key={item.id}>
+                    <td className="border border-slate-200 p-2 bg-slate-50">
+                      <span className="font-bold text-slate-800 block">{item.category}{unit ? ` (${unit})` : ''}</span>
+                      <span className="text-xs text-slate-500 block">{item.name}</span>
+                    </td>
+                    {[0, 1, 2, 3].map(ri => (
+                      <React.Fragment key={ri}>
+                        <td className="border border-slate-200 p-1">
+                          <div className="flex items-center justify-center gap-1">
+                            <input type="text" inputMode="decimal" className="flex-1 min-w-0 border border-slate-200 rounded px-2 py-1.5 text-center text-sm" placeholder="—"
+                              value={getRoundValue(ri, item.id, 'avg')} onChange={e => handleRoundChange(ri, item.id, 'avg', e.target.value)} />
+                            {unit ? <span className="text-slate-500 text-xs shrink-0">{unit}</span> : null}
+                          </div>
+                        </td>
+                        <td className="border border-slate-200 p-1 bg-blue-50/50">
+                          <div className="flex items-center justify-center gap-1">
+                            <input type="text" inputMode="decimal" className="flex-1 min-w-0 border border-blue-200 rounded px-2 py-1.5 text-center text-sm font-medium" placeholder="—"
+                              value={getRoundValue(ri, item.id, 'result')} onChange={e => handleRoundChange(ri, item.id, 'result', e.target.value)} />
+                            {unit ? <span className="text-slate-500 text-xs shrink-0">{unit}</span> : null}
+                          </div>
+                        </td>
+                      </React.Fragment>
+                    ))}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           <p className="text-xs text-slate-400 mt-3">※ 身長・体重は常に表示。その他は Firestore の test_items から取得しています。同年代平均は参考値、今回結果はその回の測定値を入力してください。</p>
 
-          {/* AI分析結果 */}
-          {(analysisResult || analysisLoading) && (
+          {/* AI分析結果（編集可能・保存ボタンで反映） */}
+          {(analysisResult != null || analysisLoading) && (
             <div className="mt-6 p-4 rounded-xl border border-violet-200 bg-violet-50/50">
               <h4 className="font-bold text-slate-700 flex items-center gap-2 mb-2">
                 <Sparkles size={18} className="text-violet-600"/> AI分析
@@ -2785,7 +2832,15 @@ const FitnessTestModal = ({ personName, db, onClose }) => {
               {analysisLoading ? (
                 <p className="text-slate-500">分析中...</p>
               ) : (
-                <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{analysisResult}</div>
+                <>
+                  <textarea
+                    className="w-full min-h-[200px] p-3 text-sm text-slate-700 leading-relaxed border border-violet-200 rounded-lg bg-white resize-y"
+                    placeholder="AI分析の結果がここに表示されます。文章を修正してから「保存」で反映できます。"
+                    value={analysisResult ?? ''}
+                    onChange={e => setAnalysisResult(e.target.value)}
+                  />
+                  <p className="text-xs text-slate-500 mt-1">※ 上の文章は自由に編集できます。編集後に「保存」を押すとFirebaseに反映されます。</p>
+                </>
               )}
               <p className="text-xs text-slate-400 mt-2">※ 入力データはOpenAI APIに送信されます。APIキーは .env の VITE_OPENAI_API_KEY で設定してください。</p>
             </div>

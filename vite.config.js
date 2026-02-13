@@ -29,8 +29,8 @@ export default defineConfig({
     })
   ],
   server: {
-    host: true,   // localhost と ネットワークIP の両方でアクセス可能に
-    port: 3001,   // RZT-SCH-APP 用ポート
-    strictPort: false  // 3001が使用中なら次の空きポートを使用
+    host: 'localhost',
+    port: 3001,
+    strictPort: false
   }
 })
