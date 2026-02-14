@@ -89,46 +89,77 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  const handleLoginWithUser = async (userName, userRole) => {
+  const buildStudentDisplayName = (data) => {
+    if (!data || typeof data !== 'object') return '';
+    const lastName = data.lastName || data.苗字 || data.姓 || '';
+    const firstName = data.firstName || data.名前 || data.名 || '';
+    const middleName = data.middleName || data.ミドルネーム || '';
+    const nameParts = [];
+    if (lastName) nameParts.push(lastName);
+    if (middleName && String(middleName).trim() !== '') nameParts.push(middleName);
+    if (firstName) nameParts.push(firstName);
+    if (nameParts.length > 0) return nameParts.join(' ');
+    if (data.name) return data.name;
+    if (data.studentName) return data.studentName;
+    if (data.fullName) return data.fullName;
+    return '';
+  };
+
+  const doStudentSignIn = async (userName) => {
+    const userCredential = await signInAnonymously(auth);
+    const profile = { name: userName, updatedAt: serverTimestamp(), role: 'member' };
+    await setDoc(doc(db, "app_users", userCredential.user.uid), profile, { merge: true });
+    setUserProfile({ name: userName, role: 'member' });
+  };
+
+  const handleLoginWithUser = async (userName, userRole, studentPassword = '') => {
     try {
       console.log("handleLoginWithUser呼び出し:", userName, userRole);
       
-      // 管理者の場合はピンコード入力画面を表示
       if (userRole === 'admin') {
         console.log("管理者ログイン: ピンコードモーダルを表示");
         setPendingInstructorName(userName);
         setShowPinCodeModal(true);
-        console.log("モーダル状態設定完了 - showPinCodeModal: true, pendingInstructorName:", userName);
         return;
       }
       
-      // 生徒の場合は直接ログイン
-      console.log("生徒ログイン: 匿名認証を開始");
-      const userCredential = await signInAnonymously(auth);
-      console.log("匿名認証成功:", userCredential.user.uid);
-      
-      const profile = { 
-        name: userName, 
-        updatedAt: serverTimestamp(), 
-        role: userRole 
-      }; 
-      
-      console.log("プロファイルを保存中:", profile);
-      try {
-        await setDoc(doc(db, "app_users", userCredential.user.uid), profile, { merge: true });
-        console.log("プロファイル保存完了");
-      } catch (saveError) {
-        console.error("プロファイル保存エラー:", saveError);
-        console.error("エラー詳細:", saveError.code, saveError.message);
-        throw saveError;
+      // 生徒: 名前とパスワードの両方が一致したときだけログイン可能
+      if (userRole === 'member') {
+        const normForMatch = (s) => String(s ?? '').trim().replace(/\s+/g, '');
+        const snap = await getDocs(collection(db, 'students'));
+        const userNameNorm = normForMatch(userName);
+        let matchedDoc = null;
+        for (const d of snap.docs) {
+          const data = d.data();
+          const displayName = buildStudentDisplayName(data);
+          if (normForMatch(displayName) !== userNameNorm) continue;
+          matchedDoc = d;
+          break;
+        }
+        if (!matchedDoc) {
+          alert('該当する生徒が見つかりません。');
+          return;
+        }
+        const storedPassword = matchedDoc.data().password;
+        const hasPassword = storedPassword != null && String(storedPassword).trim() !== '';
+        if (!hasPassword) {
+          alert('この生徒にはパスワードが設定されていません。管理者に連絡してください。');
+          return;
+        }
+        const inputTrimmed = String(studentPassword ?? '').trim();
+        const storedTrimmed = String(storedPassword).trim();
+        if (inputTrimmed !== storedTrimmed) {
+          alert('パスワードが正しくありません。');
+          return;
+        }
+        console.log("生徒ログイン: 名前・パスワード一致、匿名認証を開始");
+        await doStudentSignIn(userName);
+        return;
       }
       
-      setUserProfile({ name: userName, role: userRole });
-      console.log("ユーザープロファイル設定完了");
+      await doStudentSignIn(userName);
     } catch (error) {
       console.error("ログインエラー詳細:", error);
-      console.error("エラーコード:", error.code);
-      console.error("エラーメッセージ:", error.message);
       alert("ログインエラー: " + (error.message || error.code || "不明なエラーが発生しました"));
     }
   };
@@ -206,7 +237,6 @@ export default function App() {
 
   if (loading) return <div className="flex h-screen items-center justify-center text-slate-500">Loading...</div>;
 
-  // ピンコードモーダルを表示する場合（ユーザーがログインしていなくても表示）
   if (showPinCodeModal) {
     return (
       <div className="flex h-screen items-center justify-center bg-slate-100">
@@ -350,6 +380,7 @@ const LoginScreen = ({ onLogin, db }) => {
   const [instructors, setInstructors] = useState([]);
   const [selectedStudent, setSelectedStudent] = useState('');
   const [selectedInstructor, setSelectedInstructor] = useState('');
+  const [studentPassword, setStudentPassword] = useState('');
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [loadingInstructors, setLoadingInstructors] = useState(false);
 
@@ -509,7 +540,7 @@ const LoginScreen = ({ onLogin, db }) => {
     }
     try {
       console.log("生徒ログイン開始:", selectedStudent);
-      await onLogin(selectedStudent, 'member');
+      await onLogin(selectedStudent, 'member', studentPassword);
       console.log("生徒ログイン完了");
     } catch (error) {
       console.error("生徒ログインエラー:", error);
@@ -561,7 +592,7 @@ const LoginScreen = ({ onLogin, db }) => {
               <>
                 <select
                   value={selectedStudent}
-                  onChange={(e) => setSelectedStudent(e.target.value)}
+                  onChange={(e) => { setSelectedStudent(e.target.value); setStudentPassword(''); }}
                   className="w-full p-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-slate-700"
                 >
                   <option value="">選択してください</option>
@@ -571,18 +602,33 @@ const LoginScreen = ({ onLogin, db }) => {
                     </option>
                   ))}
                 </select>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    console.log("生徒ログインボタンクリック:", selectedStudent);
-                    handleStudentLogin();
-                  }}
-                  disabled={!selectedStudent}
-                  className="w-full mt-2 bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition shadow-md disabled:bg-slate-300 disabled:cursor-not-allowed"
-                >
-                  生徒としてログイン
-                </button>
+                {/* 生徒を選択した瞬間にパスワード入力とログインボタンを表示 */}
+                {selectedStudent && (
+                  <>
+                    <div className="mt-2">
+                      <label className="block text-sm font-medium text-slate-700 mb-1">パスワード（必須）</label>
+                      <input
+                        type="password"
+                        value={studentPassword}
+                        onChange={(e) => setStudentPassword(e.target.value)}
+                        placeholder="パスワードを入力"
+                        className="w-full p-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-slate-700"
+                      />
+                      <p className="text-xs text-slate-500 mt-0.5">※ 名前とパスワードの両方が一致したときだけログインできます。</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        console.log("生徒ログインボタンクリック:", selectedStudent);
+                        handleStudentLogin();
+                      }}
+                      className="w-full mt-2 bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition shadow-md"
+                    >
+                      ログイン
+                    </button>
+                  </>
+                )}
               </>
             )}
           </div>
@@ -1529,6 +1575,7 @@ const StudentGradesView = ({ db, userProfile }) => {
   const [rounds, setRounds] = useState([{}, {}, {}, {}]);
   const [roundDates, setRoundDates] = useState(['', '', '', '']);
   const [analysisResult, setAnalysisResult] = useState(null); // 管理者が保存したAI分析結果
+  const [instructorComment, setInstructorComment] = useState(null); // インストラクターからの一言
   const [loading, setLoading] = useState(true);
 
   const personName = userProfile?.name ?? '';
@@ -1612,10 +1659,12 @@ const StudentGradesView = ({ db, userProfile }) => {
             d.round4Date ? String(d.round4Date).slice(0, 10) : ''
           ]);
           setAnalysisResult(d.analysisResult ?? null);
+          setInstructorComment(d.instructorComment ?? null);
         } else {
           setRounds([{}, {}, {}, {}]);
           setRoundDates(['', '', '', '']);
           setAnalysisResult(null);
+          setInstructorComment(null);
         }
       } catch (e) {
         console.error(e);
@@ -1775,6 +1824,12 @@ const StudentGradesView = ({ db, userProfile }) => {
                   </h4>
                   <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{analysisResult}</div>
                   <p className="text-xs text-slate-400 mt-2">※ 管理者が体力測定画面でAI分析を実行すると、ここに表示されます。</p>
+                </div>
+              )}
+              {instructorComment && (
+                <div className="mt-6 p-4 rounded-xl border border-sky-200 bg-sky-50/50">
+                  <h4 className="font-bold text-slate-700 mb-2">インストラクターからの一言</h4>
+                  <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{instructorComment}</div>
                 </div>
               )}
             </>
@@ -2444,10 +2499,12 @@ const FitnessTestModal = ({ personName, db, onClose }) => {
           ];
           setRoundDates(dates);
           setAnalysisResult(d.analysisResult ?? null);
+          setInstructorComment(d.instructorComment ?? '');
         } else {
           setRounds([{}, {}, {}, {}]);
           setRoundDates(['', '', '', '']);
           setAnalysisResult(null);
+          setInstructorComment('');
         }
       } catch (e) {
         console.error(e);
@@ -2540,6 +2597,25 @@ const FitnessTestModal = ({ personName, db, onClose }) => {
   // AI分析
   const [analysisResult, setAnalysisResult] = useState(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisSaving, setAnalysisSaving] = useState(false);
+  const [instructorComment, setInstructorComment] = useState('');
+
+  const handleSaveAnalysis = async () => {
+    if (!docId) return;
+    setAnalysisSaving(true);
+    try {
+      const ref = doc(db, 'fitness_results', docId);
+      await setDoc(ref, {
+        analysisResult: analysisResult ?? '',
+        analysisResultAt: serverTimestamp(),
+        instructorComment: instructorComment ?? ''
+      }, { merge: true });
+      alert('AI分析を保存しました。');
+    } catch (e) {
+      alert('AI分析の保存に失敗しました: ' + e.message);
+    }
+    setAnalysisSaving(false);
+  };
 
   const handleAiAnalysis = async () => {
     const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
@@ -2670,6 +2746,7 @@ const FitnessTestModal = ({ personName, db, onClose }) => {
         payload.analysisResult = analysisResult;
         payload.analysisResultAt = serverTimestamp();
       }
+      payload.instructorComment = instructorComment ?? '';
       await setDoc(ref, payload, { merge: true });
       alert('保存しました。' + (analysisResult ? '（AI分析結果も保存しました）' : ''));
     } catch (e) {
@@ -2835,16 +2912,39 @@ const FitnessTestModal = ({ personName, db, onClose }) => {
                 <>
                   <textarea
                     className="w-full min-h-[200px] p-3 text-sm text-slate-700 leading-relaxed border border-violet-200 rounded-lg bg-white resize-y"
-                    placeholder="AI分析の結果がここに表示されます。文章を修正してから「保存」で反映できます。"
+                    placeholder="AI分析の結果がここに表示されます。文章を修正してから「AI分析を保存」で反映できます。"
                     value={analysisResult ?? ''}
                     onChange={e => setAnalysisResult(e.target.value)}
                   />
-                  <p className="text-xs text-slate-500 mt-1">※ 上の文章は自由に編集できます。編集後に「保存」を押すとFirebaseに反映されます。</p>
+                  <div className="mt-2 flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={handleSaveAnalysis}
+                      disabled={analysisSaving}
+                      className="px-4 py-2 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {analysisSaving ? '保存中...' : 'AI分析を保存'}
+                    </button>
+                    <span className="text-xs text-slate-500">編集した文章をFirebaseに保存します。</span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">※ 上の文章は自由に編集できます。編集後に「AI分析を保存」を押すとFirebaseに反映されます。</p>
                 </>
               )}
               <p className="text-xs text-slate-400 mt-2">※ 入力データはOpenAI APIに送信されます。APIキーは .env の VITE_OPENAI_API_KEY で設定してください。</p>
             </div>
           )}
+
+          {/* インストラクターからの一言（完全フリー入力・保存ボタンで反映） */}
+          <div className="mt-6 p-4 rounded-xl border border-sky-200 bg-sky-50/50">
+            <h4 className="font-bold text-slate-700 mb-2">インストラクターからの一言</h4>
+            <textarea
+              className="w-full min-h-[120px] p-3 text-sm text-slate-700 leading-relaxed border border-sky-200 rounded-lg bg-white resize-y"
+              placeholder="保護者やお子さんへ伝えたいことを自由に書けます。保存またはAI分析を保存で反映されます。"
+              value={instructorComment ?? ''}
+              onChange={e => setInstructorComment(e.target.value)}
+            />
+            <p className="text-xs text-slate-500 mt-1">※ 自由記述です。ヘッダーの「保存」または「AI分析を保存」でFirebaseに保存されます。</p>
+          </div>
         </div>
       </div>
     </div>
