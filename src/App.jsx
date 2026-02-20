@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import EventEditorModal from './EventEditorModal';
+import FitnessTestModal from './FitnessTestModal';
 import { initializeApp } from "firebase/app";
 import { 
   getFirestore, collection, addDoc, onSnapshot, 
@@ -8,7 +10,7 @@ import { getAuth, signInAnonymously, onAuthStateChanged, signOut, setPersistence
 import { 
   Activity, Calendar, LogOut, Plus, 
   CheckCircle, XCircle, HelpCircle, User, Trash2, MapPin, Clock, 
-  Database, Home, Settings, List, Users, AlertCircle, Clipboard, Edit3, FileText, Award, Sparkles, RefreshCw, BarChart2, TrendingUp
+  Database, Home, Settings, List, Users, AlertCircle, Clipboard, Edit3, FileText, Award, Sparkles, RefreshCw, BarChart2, TrendingUp, Share2, Printer, FileDown
 } from 'lucide-react';
 import {
   LineChart, Line, BarChart, Bar, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
@@ -1576,6 +1578,7 @@ const StudentGradesView = ({ db, userProfile }) => {
   const [roundDates, setRoundDates] = useState(['', '', '', '']);
   const [analysisResult, setAnalysisResult] = useState(null); // 管理者が保存したAI分析結果
   const [instructorComment, setInstructorComment] = useState(null); // インストラクターからの一言
+  const [rhythmTraining, setRhythmTraining] = useState({ q1: '', q2: '', q3: '', q4: '' }); // リズムトレーニングの級
   const [loading, setLoading] = useState(true);
 
   const personName = userProfile?.name ?? '';
@@ -1660,11 +1663,15 @@ const StudentGradesView = ({ db, userProfile }) => {
           ]);
           setAnalysisResult(d.analysisResult ?? null);
           setInstructorComment(d.instructorComment ?? null);
+          setRhythmTraining(d.rhythmTraining && typeof d.rhythmTraining === 'object'
+            ? { q1: d.rhythmTraining.q1 ?? '', q2: d.rhythmTraining.q2 ?? '', q3: d.rhythmTraining.q3 ?? '', q4: d.rhythmTraining.q4 ?? '' }
+            : { q1: '', q2: '', q3: '', q4: '' });
         } else {
           setRounds([{}, {}, {}, {}]);
           setRoundDates(['', '', '', '']);
           setAnalysisResult(null);
           setInstructorComment(null);
+          setRhythmTraining({ q1: '', q2: '', q3: '', q4: '' });
         }
       } catch (e) {
         console.error(e);
@@ -1691,6 +1698,7 @@ const StudentGradesView = ({ db, userProfile }) => {
   }
 
   const hasAnyData = rounds.some(r => Object.keys(r).length > 0) || roundDates.some(d => d);
+  const hasRhythmData = rhythmTraining && (rhythmTraining.q1 || rhythmTraining.q2 || rhythmTraining.q3 || rhythmTraining.q4);
 
   return (
     <div className="p-4 md:p-6 overflow-auto h-full">
@@ -1738,7 +1746,7 @@ const StudentGradesView = ({ db, userProfile }) => {
               allRows={allRows}
               getRoundValue={getRoundValue}
             />
-          ) : !hasAnyData ? (
+          ) : !hasAnyData && !hasRhythmData ? (
             <p className="text-slate-500 py-8 text-center">
               この年度の体力測定データはまだ登録されていません。管理者が入力するとここに表示されます。
               <br />
@@ -1746,7 +1754,28 @@ const StudentGradesView = ({ db, userProfile }) => {
             </p>
           ) : (
             <>
+              {/* リズムトレーニング（級）表示 - 管理者が入力したQを生徒成績表に表示（体力データがなくても表示） */}
+              {hasRhythmData && (
+                <div className="mb-6 p-4 bg-emerald-50 rounded-xl border border-emerald-200">
+                  <h4 className="font-bold text-slate-800 mb-3 flex items-center gap-2">
+                    <Share2 size={18} className="text-emerald-600"/> リズム(級) リズムトレーニング
+                  </h4>
+                  <div className="flex flex-wrap gap-6">
+                    {[1, 2, 3, 4].map(n => (
+                      <div key={n} className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-slate-600">{n}回目</span>
+                        <span className="text-lg font-bold text-slate-800 bg-white px-3 py-2 rounded-lg border border-emerald-200 min-w-[4rem] text-center">
+                          {rhythmTraining?.[`q${n}`] || '—'}
+                        </span>
+                        <span className="text-xs text-slate-500">級</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {/* 成績表タブ: 測定日 + 表 */}
+              {hasAnyData && (
+              <>
               <div className="mb-4 p-3 bg-slate-50 rounded-lg border border-slate-200">
                 <p className="text-xs font-bold text-slate-600 mb-2">各回の測定日</p>
                 <div className="flex flex-wrap gap-4 items-center">
@@ -1816,6 +1845,8 @@ const StudentGradesView = ({ db, userProfile }) => {
                   </tbody>
                 </table>
               </div>
+              </>
+              )}
               {/* 管理者が保存したAI分析結果（生徒も表示可能） */}
               {analysisResult && (
                 <div className="mt-6 p-4 rounded-xl border border-violet-200 bg-violet-50/50">
@@ -2321,788 +2352,4 @@ const AdminGradeSheet = ({ db, events, getUniqueAttendees }) => {
 // 1回分のデータは test_item id をキーに { avg, result }
 const emptyRound = () => ({});
 
-// 生年月日から「その年度の4月1日時点の年齢」を算出（日本の学年基準）
-const getAgeAsOfApril1 = (birthDate, schoolYear) => {
-  if (!birthDate) return null;
-  let date;
-  if (birthDate && typeof birthDate.toDate === 'function') date = birthDate.toDate();
-  else if (typeof birthDate === 'string') date = new Date(birthDate);
-  else if (birthDate instanceof Date) date = birthDate;
-  else return null;
-  if (Number.isNaN(date.getTime())) return null;
-  const april1 = new Date(schoolYear, 3, 1); // 4月1日
-  let age = april1.getFullYear() - date.getFullYear();
-  if (new Date(april1.getFullYear(), date.getMonth(), date.getDate()) > april1) age -= 1;
-  return age >= 0 && age <= 20 ? age : null;
-};
-
-// 4月1日時点の年齢 → 学年（年少/年中/年長/小1〜小6）
-const ageToGrade = (age) => {
-  if (age == null) return '';
-  const map = { 3: '年少', 4: '年中', 5: '年長', 6: '小1', 7: '小2', 8: '小3', 9: '小4', 10: '小5', 11: '小6', 12: '中1', 13: '中2', 14: '中3', 15: '高1', 16: '高2', 17: '高3' };
-  return map[age] ?? '';
-};
-
-// 生徒ドキュメントから表示名を構築（ログイン画面と同じロジック）
-const buildStudentDisplayName = (data) => {
-  if (!data || typeof data !== 'object') return null;
-  const lastName = data.lastName || data.苗字 || data.姓 || '';
-  const firstName = data.firstName || data.名前 || data.名 || '';
-  const middleName = data.middleName || data.ミドルネーム || '';
-  const nameParts = [];
-  if (lastName) nameParts.push(lastName);
-  if (middleName && String(middleName).trim() !== '') nameParts.push(middleName);
-  if (firstName) nameParts.push(firstName);
-  if (nameParts.length > 0) return nameParts.join(' ').trim();
-  if (data.name) return String(data.name).trim();
-  if (data.studentName) return String(data.studentName).trim();
-  if (data.fullName) return String(data.fullName).trim();
-  return null;
-};
-
-// 体力測定成績モーダル（年4回・Firebase test_items のカテゴリ・名前を表示）
-const FitnessTestModal = ({ personName, db, onClose }) => {
-  const currentYear = new Date().getFullYear();
-  const [year, setYear] = useState(currentYear);
-  const [grade, setGrade] = useState(''); // 学年（同年代平均取得用）: 小6, 小5, 年中, 年長 など
-  const [gradeFromAge, setGradeFromAge] = useState(''); // 年齢から算出した学年（表示・自動設定用）
-  const [itemAveragesFromDb, setItemAveragesFromDb] = useState({}); // itemKey または itemId -> value（Firebase test_item_averages）
-  const [testItems, setTestItems] = useState([]); // Firebase test_items: { id, category, name, order, ... }
-  const [rounds, setRounds] = useState([{}, {}, {}, {}]); // roundIndex -> { [itemId]: { avg, result } }
-  const [roundDates, setRoundDates] = useState(['', '', '', '']); // 各回の測定日 YYYY-MM-DD
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  const docId = React.useMemo(() => {
-    const safe = String(personName).replace(/\s/g, '_').replace(/\//g, '_').replace(/[^\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf_-]/g, '_');
-    return `${year}_${safe}`;
-  }, [year, personName]);
-
-  // Firebase test_items を取得（カテゴリ・名前表示用）
-  useEffect(() => {
-    const loadTestItems = async () => {
-      try {
-        const q = query(
-          collection(db, 'test_items'),
-          orderBy('order', 'asc')
-        );
-        const snap = await getDocs(q);
-        const items = [];
-        snap.docs.forEach(d => {
-          const data = d.data();
-          if (data.isActive !== false) {
-            items.push({
-              id: d.id,
-              category: data.category || '',
-              name: data.name || '',
-              order: data.order ?? 0,
-              unit: data.unit || ''
-            });
-          }
-        });
-        setTestItems(items);
-      } catch (e) {
-        console.error('test_items 取得エラー:', e);
-        setTestItems([]);
-      }
-    };
-    loadTestItems();
-  }, [db]);
-
-  // 生徒の生年月日から学年を算出し、自動で grade を設定
-  useEffect(() => {
-    if (!personName || !year) return;
-    const load = async () => {
-      try {
-        const snap = await getDocs(collection(db, 'students'));
-        let birthDate = null;
-        for (const d of snap.docs) {
-          const data = d.data();
-          const displayName = buildStudentDisplayName(data);
-          if (!displayName) continue;
-          const normalized = displayName.replace(/\s+/g, ' ').trim();
-          const targetNormalized = String(personName).replace(/\s+/g, ' ').trim();
-          if (normalized === targetNormalized || normalized.includes(targetNormalized) || targetNormalized.includes(normalized)) {
-            birthDate = data.birthDate ?? data.生年月日 ?? data.birthday;
-            break;
-          }
-        }
-        if (!birthDate) {
-          setGradeFromAge('');
-          return;
-        }
-        const age = getAgeAsOfApril1(birthDate, year);
-        const inferredGrade = ageToGrade(age);
-        setGradeFromAge(inferredGrade);
-        if (inferredGrade) setGrade(inferredGrade); // 年齢から算出した学年で自動設定
-      } catch (e) {
-        console.error('生徒の年齢・学年取得エラー:', e);
-        setGradeFromAge('');
-      }
-    };
-    load();
-  }, [db, personName, year]);
-
-  // Firebase test_item_averages から各種目の平均値を取得（学年選択時）
-  useEffect(() => {
-    if (!grade) {
-      setItemAveragesFromDb({});
-      return;
-    }
-    const load = async () => {
-      try {
-        const q = query(
-          collection(db, 'test_item_averages'),
-          where('grade', '==', grade)
-        );
-        const snap = await getDocs(q);
-        const byItemKey = {};  // itemKey (height_male など) -> value
-        const byItemId = {};   // test_item の doc id -> value（doc id が 学年_testItemId のとき）
-        snap.docs.forEach(d => {
-          const data = d.data();
-          const v = data.value != null ? Number(data.value) : null;
-          if (v == null || !Number.isFinite(v)) return;
-          const key = data.itemKey;
-          if (key) byItemKey[key] = v;
-          // doc id が "小6_height_male" のとき suffix は itemKey。 "年中_0qZZ..." のとき suffix は test_item id
-          const suffix = d.id.startsWith(grade + '_') ? d.id.slice(grade.length + 1) : null;
-          if (suffix && suffix !== key) byItemId[suffix] = v;
-        });
-        setItemAveragesFromDb({ byItemKey, byItemId });
-      } catch (e) {
-        console.error('test_item_averages 取得エラー:', e);
-        setItemAveragesFromDb({});
-      }
-    };
-    load();
-  }, [db, grade]);
-
-  // 成績データを取得
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      try {
-        const ref = doc(db, 'fitness_results', docId);
-        const snap = await getDoc(ref);
-        if (snap.exists()) {
-          const d = snap.data();
-          const r1 = d.round1 && typeof d.round1 === 'object' ? d.round1 : {};
-          const r2 = d.round2 && typeof d.round2 === 'object' ? d.round2 : {};
-          const r3 = d.round3 && typeof d.round3 === 'object' ? d.round3 : {};
-          const r4 = d.round4 && typeof d.round4 === 'object' ? d.round4 : {};
-          setRounds([r1, r2, r3, r4]);
-          const dates = [
-            d.round1Date ? String(d.round1Date).slice(0, 10) : '',
-            d.round2Date ? String(d.round2Date).slice(0, 10) : '',
-            d.round3Date ? String(d.round3Date).slice(0, 10) : '',
-            d.round4Date ? String(d.round4Date).slice(0, 10) : ''
-          ];
-          setRoundDates(dates);
-          setAnalysisResult(d.analysisResult ?? null);
-          setInstructorComment(d.instructorComment ?? '');
-        } else {
-          setRounds([{}, {}, {}, {}]);
-          setRoundDates(['', '', '', '']);
-          setAnalysisResult(null);
-          setInstructorComment('');
-        }
-      } catch (e) {
-        console.error(e);
-      }
-      setLoading(false);
-    };
-    load();
-  }, [db, docId]);
-
-  const handleRoundChange = (roundIndex, itemId, field, value) => {
-    setRounds(prev => {
-      const next = [...prev];
-      const round = { ...(next[roundIndex] || {}) };
-      const item = round[itemId] || { avg: '', result: '' };
-      round[itemId] = { ...item, [field]: value };
-      next[roundIndex] = round;
-      return next;
-    });
-  };
-
-  const getRoundValue = (roundIndex, itemId, field) => {
-    const round = rounds[roundIndex] || {};
-    const item = round[itemId] || {};
-    return item[field] ?? '';
-  };
-
-  const handleRoundDateChange = (roundIndex, value) => {
-    setRoundDates(prev => {
-      const next = [...prev];
-      next[roundIndex] = value;
-      return next;
-    });
-  };
-
-  // Firebase test_item_averages で読み込んだ同年代平均を、全4回の「同年代平均」欄に一括反映
-  const handleApplyAveragesFromDb = () => {
-    const { byItemKey = {}, byItemId = {} } = itemAveragesFromDb;
-    if (Object.keys(byItemKey).length === 0 && Object.keys(byItemId).length === 0) {
-      alert('学年を選んでから「同年代平均をFirebaseから読み込む」を押すか、先に「同年代平均を読み込む」で取得してください。');
-      return;
-    }
-    const getAvgForItem = (item) => {
-      if (item.id === '_height') {
-        const m = byItemKey['height_male'], f = byItemKey['height_female'];
-        if (m != null && f != null) return String((Number(m) + Number(f)) / 2);
-        if (m != null) return String(m);
-        if (f != null) return String(f);
-        return '';
-      }
-      if (item.id === '_weight') {
-        const m = byItemKey['weight_male'], f = byItemKey['weight_female'];
-        if (m != null && f != null) return String((Number(m) + Number(f)) / 2);
-        if (m != null) return String(m);
-        if (f != null) return String(f);
-        return '';
-      }
-      const v = byItemId[item.id] ?? byItemKey[item.id];
-      return v != null ? String(v) : '';
-    };
-    const fixedRows = [
-      { id: '_height', category: '身長', name: '' },
-      { id: '_weight', category: '体重', name: '' }
-    ];
-    const allRowsForApply = [...fixedRows, ...testItems];
-    setRounds(prev => {
-      const next = prev.map(round => {
-        const nextRound = { ...round };
-        allRowsForApply.forEach(item => {
-          const avg = getAvgForItem(item);
-          if (avg) {
-            const current = nextRound[item.id] || { avg: '', result: '' };
-            nextRound[item.id] = { ...current, avg };
-          }
-        });
-        return nextRound;
-      });
-      return next;
-    });
-    alert('同年代平均をFirebaseの値で反映しました。');
-  };
-
-  // Firebase に無くても常に表示する固定項目（身長・体重）
-  const fixedRows = [
-    { id: '_height', category: '身長', name: '' },
-    { id: '_weight', category: '体重', name: '' }
-  ];
-
-  const allRows = [...fixedRows, ...testItems];
-
-  // AI分析
-  const [analysisResult, setAnalysisResult] = useState(null);
-  const [analysisLoading, setAnalysisLoading] = useState(false);
-  const [analysisSaving, setAnalysisSaving] = useState(false);
-  const [instructorComment, setInstructorComment] = useState('');
-
-  const handleSaveAnalysis = async () => {
-    if (!docId) return;
-    setAnalysisSaving(true);
-    try {
-      const ref = doc(db, 'fitness_results', docId);
-      await setDoc(ref, {
-        analysisResult: analysisResult ?? '',
-        analysisResultAt: serverTimestamp(),
-        instructorComment: instructorComment ?? ''
-      }, { merge: true });
-      alert('AI分析を保存しました。');
-    } catch (e) {
-      alert('AI分析の保存に失敗しました: ' + e.message);
-    }
-    setAnalysisSaving(false);
-  };
-
-  const handleAiAnalysis = async () => {
-    const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-    if (!apiKey) {
-      alert('AI分析を使うには、.env に VITE_OPENAI_API_KEY を設定してください。');
-      return;
-    }
-    // 入力済みデータをテキストにまとめる
-    const lines = [];
-    lines.push(`${personName} さん ${year}年度 体力測定データ`);
-    lines.push('【数値の意味】「平均」＝同年代平均（参考値・その子の過去の値ではない）。「今回」＝その子本人のその回の測定値（実測値）。「伸びた／増えた」は必ず「今回」どうしの比較のみ。平均と今回を混ぜて伸びの計算をしないこと。');
-    lines.push('');
-    allRows.forEach((item) => {
-      const label = item.name ? `${item.category}（${item.name}）` : item.category;
-      const rowData = [];
-      [0, 1, 2, 3].forEach(ri => {
-        const avg = getRoundValue(ri, item.id, 'avg');
-        const res = getRoundValue(ri, item.id, 'result');
-        if (avg || res) rowData.push(`${ri + 1}回目: 平均=${avg || '—'} 今回=${res || '—'}`);
-      });
-      if (rowData.length) lines.push(`${label}: ${rowData.join(', ')}`);
-    });
-    const dataText = lines.join('\n');
-    if (!dataText.trim() || lines.length <= 2) {
-      alert('分析するには、少なくとも1種目以上に数値を入力してください。');
-      return;
-    }
-    setAnalysisLoading(true);
-    setAnalysisResult(null);
-    try {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            {
-              role: 'system',
-              content: `あなたは児童・生徒の体力測定を分析し、その結果を**お母さん（保護者）に渡す文章**を書く専門家です。読み手は「わが子の様子を知りたいお母さん」です。お母さんが読んで「この子、ここ伸びてるんだな」「ここはこれからだな」と、**感情的にすっと伝わる・心に残る**文章にしてください。EQを高く、子どもに寄り添い、お母さんにも寄り添うトーンで書いてください。
-
-【誰のための文章か】
-・この分析は**お母さんに見せる**ためのものです。お母さんが「うれしい」「安心した」「ここを応援してあげよう」と自然に思えるように、種目ごとの「伸びているところ」と「もう少し伸ばしたいところ」が感情的に伝わるように書いてください。
-・「伸びた種目」では、お母さんが「よく頑張ってる」と誇らしく思えるような、喜びや称賛が伝わる表現を。「ちょっと届いていない種目」では、責めず「これから伸びる余地がある」「次が楽しみ」と前向きに伝え、お母さんが不安になりすぎないようにしてください。
-
-【トーン・文体】
-・温かく、寄り添う語りかけ。お母さんの気持ちに共感しつつ、お子さんの頑張りや成長を具体的に伝える。
-・「〜ですね」「〜がうかがえます」「お子さんの〜が伝わってきます」など、相手を意識した柔らかい表現。
-・**伸びている種目**：「しっかり伸びていて頼もしいです」「うれしいですね」「お子さんの〇〇、とても良く頑張っています」など、喜びや称賛が感情的に伝わるように。
-・**課題やまだ伸び余地がある種目**：「もう少し伸ばしたいところ」「これからが楽しみです」「次回の伸びに期待できます」など、責めず前向きに。お母さんが「じゃあここを一緒に楽しもう」と思えるような締めに。
-・文字数制限は設けません。種目ごとの「伸びた／これから」が感情的に伝わるよう、丁寧に書いてください。短くまとめすぎず、お母さんが「わが子の成長」をしっかり感じ取れる長さで。
-
-【最重要：平均値と測定値は別物（絶対に混同しないこと）】
-・**平均**＝同年代平均＝「その学年・年代の参考値」であり、**その子の過去の値ではない**。他人の平均なので、「平均から伸びた」という表現は論理的に間違いです。
-・**今回**＝本人の測定値＝「その子自身がその回に計った値」だけを指す。成長や「伸びた」を語るときに使ってよいのは**この「今回」の時系列だけ**です。
-・したがって「1回目の平均」と「4回目の今回」を引き算して「○cm伸びました」と書くのは**禁止**。平均はその子の過去の身長・体重ではないため、伸びの計算に使ってはいけません。
-
-【「伸びた／増えた」の使い方（厳守）】
-・「伸びている」「○cm伸びた」「○kg増えた」は、**必ず「今回」だけ**を比較して書く。つまり「1回目の今回」と「4回目の今回」など、**本人の測定値どうし**の差だけ。
-・正しい例：1回目今回127cm・4回目今回160cm → 「1回目127cmから4回目160cmで33cm伸びています」（本人の測定値の時系列のみ）。
-・誤り例：1回目平均127cm・4回目今回160cm を比べて「33cm伸びています」と書くのは禁止。平均は本人の値ではないので、伸びの計算に使わない。
-
-【同年代平均との比較（別の言い方で使う）】
-・平均と今回を比べるときは「平均より○cm高いです」「平均に比べて上回っています」「同年代平均○cmに対し今回○cmで、平均より高いです」など。ここでは「伸びた」は使わない。「伸びた」は本人の過去の測定値→今の測定値のときだけ。
-
-【表現のルール】
-・成長・伸びの記述は「今回」の値の時系列のみ。平均値は成長の記述に一切使わない。
-・身長・体重の「伸びた／増えた」も、1回目今回〜4回目今回の**本人の測定値**だけで計算し、平均は使わない。
-
-【種目ごとの「良い方向」の基準】
-・俊敏性（7mラン等）: タイムは数値が小さいほど良い。
-・身長・体重: 身長は大きい＝成長、体重は文脈に応じて。
-・筋力（腹筋）・瞬発力（立ち幅跳び等）・柔軟性（長座体前屈）: 数値が大きいほど良い。
-・その他タイム系: 数値が小さいほど良い。`
-            },
-            {
-              role: 'user',
-              content: dataText
-            }
-          ],
-          max_tokens: 1000,
-          temperature: 0.3
-        })
-      });
-      const json = await res.json();
-      if (json.error) throw new Error(json.error.message || 'APIエラー');
-      const text = json.choices?.[0]?.message?.content?.trim();
-      const resultText = text || '分析結果を取得できませんでした。';
-      setAnalysisResult(resultText);
-      try {
-        const ref = doc(db, 'fitness_results', docId);
-        await setDoc(ref, {
-          analysisResult: resultText,
-          analysisResultAt: serverTimestamp()
-        }, { merge: true });
-        alert('AI分析を実行し、結果をFirebaseに保存しました。\n（fitness_results / ' + docId + '）');
-      } catch (saveErr) {
-        console.error('AI分析結果の保存エラー:', saveErr);
-        alert('AI分析結果のFirebase保存に失敗しました: ' + (saveErr?.message || String(saveErr)) + '\n\nFirestoreのルールで書き込みが許可されているか確認してください。');
-      }
-    } catch (e) {
-      console.error(e);
-      setAnalysisResult('分析に失敗しました: ' + (e.message || String(e)));
-    }
-    setAnalysisLoading(false);
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      const ref = doc(db, 'fitness_results', docId);
-      const payload = {
-        name: personName,
-        year,
-        round1: rounds[0],
-        round2: rounds[1],
-        round3: rounds[2],
-        round4: rounds[3],
-        round1Date: roundDates[0] || null,
-        round2Date: roundDates[1] || null,
-        round3Date: roundDates[2] || null,
-        round4Date: roundDates[3] || null,
-        updatedAt: serverTimestamp()
-      };
-      if (analysisResult) {
-        payload.analysisResult = analysisResult;
-        payload.analysisResultAt = serverTimestamp();
-      }
-      payload.instructorComment = instructorComment ?? '';
-      await setDoc(ref, payload, { merge: true });
-      alert('保存しました。' + (analysisResult ? '（AI分析結果も保存しました）' : ''));
-    } catch (e) {
-      alert('保存に失敗しました: ' + e.message);
-    }
-    setSaving(false);
-  };
-
-  if (loading) {
-    return (
-      <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-xl p-8 text-slate-500">読み込み中...</div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm overflow-y-auto">
-      <div className="bg-white w-full max-w-4xl my-8 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
-        <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-slate-50 flex-shrink-0">
-          <h3 className="font-bold text-slate-800 flex items-center gap-2">
-            <Award size={20} className="text-amber-500"/> {personName} 体力測定成績（年4回）
-          </h3>
-          <div className="flex items-center gap-2 flex-wrap">
-            <label className="text-xs text-slate-500 font-medium">年度:</label>
-            <select value={year} onChange={e => setYear(Number(e.target.value))} className="border border-slate-300 rounded-lg px-3 py-2 text-sm">
-              {[currentYear, currentYear - 1, currentYear - 2].map(y => <option key={y} value={y}>{y}年</option>)}
-            </select>
-            <label className="text-xs text-slate-500 font-medium">学年（同年代平均）:</label>
-            <select value={grade} onChange={e => setGrade(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm">
-              <option value="">選択</option>
-              {['小6', '小5', '小4', '小3', '年中', '年長', '年少', '中1', '中2', '中3', '高1', '高2', '高3'].map(g => (
-                <option key={g} value={g}>{g}</option>
-              ))}
-            </select>
-            {gradeFromAge && (
-              <span className="text-xs text-slate-500">（年齢から算出）</span>
-            )}
-            <button onClick={handleApplyAveragesFromDb} type="button" className="flex items-center gap-1 text-sm bg-amber-600 text-white px-3 py-2 rounded-lg hover:bg-amber-700">
-              <Database size={14} /> 同年代平均をFirebaseから読み込む
-            </button>
-            <button onClick={handleSave} disabled={saving} className="flex items-center gap-1 text-sm bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50">
-              {saving ? '保存中...' : '保存'}
-            </button>
-            <button onClick={handleAiAnalysis} disabled={analysisLoading} className="flex items-center gap-1 text-sm bg-violet-600 text-white px-4 py-2 rounded-lg hover:bg-violet-700 disabled:opacity-50">
-              <Sparkles size={16} /> {analysisLoading ? '分析中...' : 'AI分析'}
-            </button>
-            <button onClick={onClose} className="p-2 rounded-lg text-slate-500 hover:bg-slate-200 hover:text-slate-700">
-              <XCircle size={20} />
-            </button>
-          </div>
-        </div>
-        <div className="overflow-auto flex-1 p-4">
-          {/* 各回の測定日（年4回の体力測定の日付） */}
-          <div className="mb-4 p-3 bg-slate-50 rounded-lg border border-slate-200">
-            <p className="text-xs font-bold text-slate-600 mb-2">各回の測定日（年4回の体力測定を行った日付）</p>
-            <div className="flex flex-wrap gap-4 items-center">
-              {[0, 1, 2, 3].map(ri => (
-                <div key={ri} className="flex items-center gap-2">
-                  <label className="text-sm font-medium text-slate-700">{ri + 1}回目</label>
-                  <input
-                    type="date"
-                    className="border border-slate-300 rounded px-2 py-1.5 text-sm"
-                    value={roundDates[ri]}
-                    onChange={e => handleRoundDateChange(ri, e.target.value)}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <table className="w-full text-sm border-collapse" style={{ minWidth: '600px' }}>
-            <thead>
-              <tr>
-                <th className="border border-slate-300 p-2 bg-slate-100 font-bold text-slate-700 text-left w-36" rowSpan={2}>種目</th>
-                {[1, 2, 3, 4].map(n => (
-                  <th key={n} className="border border-slate-300 p-2 bg-slate-100 font-bold text-slate-700 text-center" colSpan={2}>{n}回目</th>
-                ))}
-              </tr>
-              <tr>
-                {[0, 1, 2, 3].map(ri => (
-                  <React.Fragment key={ri}>
-                    <th className="border border-slate-300 p-1.5 bg-slate-50 text-slate-600 text-center text-xs w-24">同年代平均</th>
-                    <th className="border border-slate-300 p-1.5 bg-blue-50 text-blue-800 font-bold text-center text-xs w-24">今回結果</th>
-                  </React.Fragment>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {/* 身長・体重は Firebase に無くても常に表示 */}
-              {fixedRows.map((item) => {
-                const unit = getUnitForItem(item);
-                return (
-                  <tr key={item.id}>
-                    <td className="border border-slate-200 p-2 bg-slate-50">
-                      <span className="font-bold text-slate-800 block">{item.category}{unit ? ` (${unit})` : ''}</span>
-                      {item.name ? <span className="text-xs text-slate-500 block">{item.name}</span> : null}
-                    </td>
-                    {[0, 1, 2, 3].map(ri => (
-                      <React.Fragment key={ri}>
-                        <td className="border border-slate-200 p-1">
-                          <div className="flex items-center justify-center gap-1">
-                            <input type="text" inputMode="decimal" className="flex-1 min-w-0 border border-slate-200 rounded px-2 py-1.5 text-center text-sm" placeholder="—"
-                              value={getRoundValue(ri, item.id, 'avg')} onChange={e => handleRoundChange(ri, item.id, 'avg', e.target.value)} />
-                            {unit ? <span className="text-slate-500 text-xs shrink-0">{unit}</span> : null}
-                          </div>
-                        </td>
-                        <td className="border border-slate-200 p-1 bg-blue-50/50">
-                          <div className="flex items-center justify-center gap-1">
-                            <input type="text" inputMode="decimal" className="flex-1 min-w-0 border border-blue-200 rounded px-2 py-1.5 text-center text-sm font-medium" placeholder="—"
-                              value={getRoundValue(ri, item.id, 'result')} onChange={e => handleRoundChange(ri, item.id, 'result', e.target.value)} />
-                            {unit ? <span className="text-slate-500 text-xs shrink-0">{unit}</span> : null}
-                          </div>
-                        </td>
-                      </React.Fragment>
-                    ))}
-                  </tr>
-                );
-              })}
-              {/* Firestore test_items の項目 */}
-              {testItems.map((item) => {
-                const unit = getUnitForItem(item);
-                return (
-                  <tr key={item.id}>
-                    <td className="border border-slate-200 p-2 bg-slate-50">
-                      <span className="font-bold text-slate-800 block">{item.category}{unit ? ` (${unit})` : ''}</span>
-                      <span className="text-xs text-slate-500 block">{item.name}</span>
-                    </td>
-                    {[0, 1, 2, 3].map(ri => (
-                      <React.Fragment key={ri}>
-                        <td className="border border-slate-200 p-1">
-                          <div className="flex items-center justify-center gap-1">
-                            <input type="text" inputMode="decimal" className="flex-1 min-w-0 border border-slate-200 rounded px-2 py-1.5 text-center text-sm" placeholder="—"
-                              value={getRoundValue(ri, item.id, 'avg')} onChange={e => handleRoundChange(ri, item.id, 'avg', e.target.value)} />
-                            {unit ? <span className="text-slate-500 text-xs shrink-0">{unit}</span> : null}
-                          </div>
-                        </td>
-                        <td className="border border-slate-200 p-1 bg-blue-50/50">
-                          <div className="flex items-center justify-center gap-1">
-                            <input type="text" inputMode="decimal" className="flex-1 min-w-0 border border-blue-200 rounded px-2 py-1.5 text-center text-sm font-medium" placeholder="—"
-                              value={getRoundValue(ri, item.id, 'result')} onChange={e => handleRoundChange(ri, item.id, 'result', e.target.value)} />
-                            {unit ? <span className="text-slate-500 text-xs shrink-0">{unit}</span> : null}
-                          </div>
-                        </td>
-                      </React.Fragment>
-                    ))}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          <p className="text-xs text-slate-400 mt-3">※ 身長・体重は常に表示。その他は Firestore の test_items から取得しています。同年代平均は参考値、今回結果はその回の測定値を入力してください。</p>
-
-          {/* AI分析結果（編集可能・保存ボタンで反映） */}
-          {(analysisResult != null || analysisLoading) && (
-            <div className="mt-6 p-4 rounded-xl border border-violet-200 bg-violet-50/50">
-              <h4 className="font-bold text-slate-700 flex items-center gap-2 mb-2">
-                <Sparkles size={18} className="text-violet-600"/> AI分析
-              </h4>
-              {analysisLoading ? (
-                <p className="text-slate-500">分析中...</p>
-              ) : (
-                <>
-                  <textarea
-                    className="w-full min-h-[200px] p-3 text-sm text-slate-700 leading-relaxed border border-violet-200 rounded-lg bg-white resize-y"
-                    placeholder="AI分析の結果がここに表示されます。文章を修正してから「AI分析を保存」で反映できます。"
-                    value={analysisResult ?? ''}
-                    onChange={e => setAnalysisResult(e.target.value)}
-                  />
-                  <div className="mt-2 flex items-center gap-2 flex-wrap">
-                    <button
-                      type="button"
-                      onClick={handleSaveAnalysis}
-                      disabled={analysisSaving}
-                      className="px-4 py-2 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {analysisSaving ? '保存中...' : 'AI分析を保存'}
-                    </button>
-                    <span className="text-xs text-slate-500">編集した文章をFirebaseに保存します。</span>
-                  </div>
-                  <p className="text-xs text-slate-500 mt-1">※ 上の文章は自由に編集できます。編集後に「AI分析を保存」を押すとFirebaseに反映されます。</p>
-                </>
-              )}
-              <p className="text-xs text-slate-400 mt-2">※ 入力データはOpenAI APIに送信されます。APIキーは .env の VITE_OPENAI_API_KEY で設定してください。</p>
-            </div>
-          )}
-
-          {/* インストラクターからの一言（完全フリー入力・保存ボタンで反映） */}
-          <div className="mt-6 p-4 rounded-xl border border-sky-200 bg-sky-50/50">
-            <h4 className="font-bold text-slate-700 mb-2">インストラクターからの一言</h4>
-            <textarea
-              className="w-full min-h-[120px] p-3 text-sm text-slate-700 leading-relaxed border border-sky-200 rounded-lg bg-white resize-y"
-              placeholder="保護者やお子さんへ伝えたいことを自由に書けます。保存またはAI分析を保存で反映されます。"
-              value={instructorComment ?? ''}
-              onChange={e => setInstructorComment(e.target.value)}
-            />
-            <p className="text-xs text-slate-500 mt-1">※ 自由記述です。ヘッダーの「保存」または「AI分析を保存」でFirebaseに保存されます。</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const EventEditorModal = ({ isOpen, onClose, event, date, db, user }) => {
-  // If event exists, edit mode. Else, create mode.
-  const [title, setTitle] = useState(event?.title || 'レッスン');
-  const [locations, setLocations] = useState([]);
-  const formatLocalDate = (d) => {
-    if (!d) return '';
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-  const [targetDate, setTargetDate] = useState(
-    event ? formatLocalDate(event.start) : formatLocalDate(date)
-  );
-  const [startTime, setStartTime] = useState(
-    event ? `${String(event.start.getHours()).padStart(2,'0')}:${String(event.start.getMinutes()).padStart(2,'0')}` : '17:00'
-  );
-  const [endTime, setEndTime] = useState(
-    event ? `${String(event.end.getHours()).padStart(2,'0')}:${String(event.end.getMinutes()).padStart(2,'0')}` : '18:00'
-  );
-  const [location, setLocation] = useState(event?.location || '');
-
-  // locationsコレクションからデータを取得
-  useEffect(() => {
-    const q = collection(db, "locations");
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const locationList = [];
-      snapshot.docs.forEach(doc => {
-        const data = doc.data();
-        // 様々なフィールド名から場所名を取得
-        let locationName = null;
-        if (data && typeof data === 'object') {
-          if (data.name) {
-            locationName = data.name;
-          } else if (data.location) {
-            locationName = data.location;
-          } else if (data.場所) {
-            locationName = data.場所;
-          } else if (data.locationName) {
-            locationName = data.locationName;
-          }
-        } else if (typeof data === 'string') {
-          locationName = data;
-        }
-        
-        if (locationName && typeof locationName === 'string' && locationName.trim() !== '') {
-          locationList.push(locationName.trim());
-        }
-      });
-      
-      // 重複を除去してソート
-      const uniqueLocations = [...new Set(locationList)];
-      uniqueLocations.sort((a, b) => a.localeCompare(b, 'ja'));
-      setLocations(uniqueLocations);
-      
-      // デフォルト値設定（新規作成時のみ）
-      if (!event && uniqueLocations.length > 0 && !location) {
-        setLocation(uniqueLocations[0]);
-      }
-    }, (error) => {
-      console.error("場所データ取得エラー:", error);
-    });
-    return () => unsubscribe();
-  }, [db, event, location]);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    const [y, m, d] = targetDate.split('-').map(Number);
-    const start = new Date(y, m - 1, d);
-    const [sh, sm] = startTime.split(':');
-    start.setHours(Number(sh), Number(sm), 0, 0);
-    
-    const end = new Date(y, m - 1, d);
-    const [eh, em] = endTime.split(':');
-    end.setHours(Number(eh), Number(em), 0, 0);
-
-    const data = {
-      title, start, end, location, 
-      creatorId: user.uid, 
-      updatedAt: serverTimestamp()
-    };
-
-    if (event) {
-      await updateDoc(doc(db, "schedules", event.id), data);
-    } else {
-      await addDoc(collection(db, "schedules"), {
-        ...data, createdAt: serverTimestamp(), attendees: []
-      });
-    }
-    onClose();
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl w-full max-w-sm p-6 shadow-2xl">
-        <h3 className="font-bold mb-4 flex items-center gap-2">
-          {event ? <><Edit3 size={20}/> 予定を編集</> : <><Plus size={20}/> 新規作成</>}
-        </h3>
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div>
-            <label className="text-xs font-bold text-slate-500">タイトル</label>
-            <input type="text" value={title} onChange={e=>setTitle(e.target.value)} className="w-full p-2 border rounded" required />
-          </div>
-          <div>
-            <label className="text-xs font-bold text-slate-500">日付</label>
-            <input type="date" value={targetDate} onChange={e=>setTargetDate(e.target.value)} className="w-full p-2 border rounded" required />
-          </div>
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <label className="text-xs font-bold text-slate-500">開始</label>
-              <input type="time" value={startTime} onChange={e=>setStartTime(e.target.value)} className="w-full p-2 border rounded" required />
-            </div>
-            <span className="self-end pb-2">~</span>
-            <div className="flex-1">
-              <label className="text-xs font-bold text-slate-500">終了</label>
-              <input type="time" value={endTime} onChange={e=>setEndTime(e.target.value)} className="w-full p-2 border rounded" required />
-            </div>
-          </div>
-          <div>
-            <label className="text-xs font-bold text-slate-500">場所</label>
-            {locations.length > 0 ? (
-              <select 
-                value={location} 
-                onChange={e=>setLocation(e.target.value)} 
-                className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              >
-                <option value="">選択してください</option>
-                {locations.map((loc, index) => (
-                  <option key={index} value={loc}>
-                    {loc}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <input 
-                type="text" 
-                value={location} 
-                onChange={e=>setLocation(e.target.value)} 
-                className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500" 
-                placeholder="場所を入力..."
-              />
-            )}
-          </div>
-          <div className="flex gap-2 pt-4">
-            <button type="button" onClick={onClose} className="flex-1 py-2 bg-gray-100 rounded text-slate-600">キャンセル</button>
-            <button type="submit" className="flex-1 py-2 bg-blue-600 text-white rounded font-bold shadow-md">
-              {event ? '更新する' : '作成する'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
+// 体力測定成績モーダルは ./FitnessTestModal.jsx に分離済み

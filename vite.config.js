@@ -30,7 +30,12 @@ export default defineConfig({
   ],
   server: {
     host: 'localhost',
-    port: 3001,
+    port: 9001,
     strictPort: false
+  },
+  build: {
+    rollupOptions: {
+      input: 'index.html'
+    }
   }
 })
