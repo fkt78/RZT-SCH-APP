@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { collection, doc, getDoc, getDocs, setDoc, serverTimestamp, query, orderBy, where } from 'firebase/firestore';
 import { Award, Database, Sparkles, XCircle, Printer, FileDown, Share2 } from 'lucide-react';
 
+// 学年ドロップダウン用オプション（小1〜高3、幼稚園含む）
+const GRADE_OPTIONS = ['小6', '小5', '小4', '小3', '小2', '小1', '年中', '年長', '年少', '中1', '中2', '中3', '高1', '高2', '高3'];
+
 // 種目ごとの表示用単位
 const getUnitForItem = (item) => {
   const fromFirebase = item.unit != null && String(item.unit).trim() !== '';
@@ -428,7 +431,7 @@ export default function FitnessTestModal({ personName, db, onClose }) {
               <label className="text-xs text-slate-500 font-medium">学年（同年代平均）:</label>
               <select value={grade} onChange={e => setGrade(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm">
                 <option value="">選択</option>
-                {['小6', '小5', '小4', '小3', '年中', '年長', '年少', '中1', '中2', '中3', '高1', '高2', '高3'].map(g => (
+                {GRADE_OPTIONS.map(g => (
                   <option key={g} value={g}>{g}</option>
                 ))}
               </select>

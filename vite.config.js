@@ -8,6 +8,7 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       strategies: 'injectManifest',
+      devOptions: { enabled: false }, // 開発時はService Workerを無効化（キャッシュによる表示不具合を防止）
       srcDir: 'src',
       filename: 'sw.js',
       manifest: {
@@ -30,7 +31,7 @@ export default defineConfig({
   ],
   server: {
     host: 'localhost',
-    port: 9001,
+    port: 9010,
     strictPort: false
   },
   build: {
