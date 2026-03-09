@@ -1,0 +1,16 @@
+---
+description: Keep app version updated on every code change
+alwaysApply: true
+---
+
+# App Versioning
+
+- This app must always have a visible version number based on `package.json`.
+- Any code change, UI change, bug fix, behavior change, or dependency change must include a version bump.
+- Keep `package.json` and `package-lock.json` version values in sync.
+- Default bump policy:
+  - Patch: small fixes or small UI/wording changes
+  - Minor: new features or meaningful behavior additions
+  - Major: breaking or compatibility-affecting changes
+- When editing this project, update the version first or as part of the same change.
+- Do not leave code changes unversioned.

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import packageInfo from '../package.json';
 import EventEditorModal from './EventEditorModal';
 import FitnessTestModal from './FitnessTestModal';
 import { initializeApp } from "firebase/app";
@@ -32,6 +33,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
+const APP_VERSION = packageInfo.version;
 // リロード時に必ずログイン画面から開始したいので、永続化しない設定にする
 setPersistence(auth, inMemoryPersistence).catch((error) => {
   console.error("認証永続化設定エラー:", error);
@@ -575,6 +577,11 @@ const LoginScreen = ({ onLogin, db }) => {
         </div>
         <h1 className="text-2xl font-bold text-slate-800 mb-2 text-center">リズトレカレンダー</h1>
         <p className="text-slate-500 mb-6 text-center">レッスン日程・出欠共有アプリ</p>
+        <div className="mb-6 flex justify-center">
+          <span className="text-xs font-semibold text-slate-600 bg-slate-100 border border-slate-200 px-3 py-1 rounded-full">
+            現在のバージョン: v{APP_VERSION}
+          </span>
+        </div>
         
         {/* 生徒と管理者のドロップダウンを分けて表示 */}
         <div className="space-y-6">
@@ -732,6 +739,9 @@ const Header = ({ activeTab, userProfile }) => {
         {activeTab === 'admin' && <><Users className="text-blue-600"/> 管理・集計</>}
       </h2>
       <div className="flex items-center gap-2">
+        <div className="text-[11px] text-slate-500 font-semibold bg-slate-100 px-2 py-1 rounded-full">
+          v{APP_VERSION}
+        </div>
         <button 
           onClick={handleRefresh}
           className="text-slate-500 hover:text-blue-600 transition p-2 hover:bg-slate-100 rounded-lg"
