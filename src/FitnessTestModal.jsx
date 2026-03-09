@@ -407,6 +407,8 @@ export default function FitnessTestModal({ personName, db, onClose }) {
     setSaving(false);
   };
 
+  const [showExtra, setShowExtra] = useState(true);
+
   if (loading) {
     return (
       <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
@@ -416,187 +418,174 @@ export default function FitnessTestModal({ personName, db, onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm overflow-y-auto">
-      <div className="bg-white w-full max-w-4xl my-8 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
-        <div className="flex flex-col flex-shrink-0">
-          <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-slate-50 gap-3 flex-wrap">
-            <h3 className="font-bold text-slate-800 flex items-center gap-2">
-              <Award size={20} className="text-amber-500"/> {personName} 体力測定成績（年4回）
-            </h3>
-            <div className="flex items-center gap-2 flex-wrap">
-              <label className="text-xs text-slate-500 font-medium">年度:</label>
-              <select value={year} onChange={e => setYear(Number(e.target.value))} className="border border-slate-300 rounded-lg px-3 py-2 text-sm">
-                {[currentYear, currentYear - 1, currentYear - 2].map(y => <option key={y} value={y}>{y}年</option>)}
-              </select>
-              <label className="text-xs text-slate-500 font-medium">学年（同年代平均）:</label>
-              <select value={grade} onChange={e => setGrade(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm">
-                <option value="">選択</option>
-                {GRADE_OPTIONS.map(g => (
-                  <option key={g} value={g}>{g}</option>
-                ))}
-              </select>
-              {gradeFromAge && <span className="text-xs text-slate-500">（年齢から算出）</span>}
-              <button onClick={handleApplyAveragesFromDb} type="button" className="flex items-center gap-1 text-sm bg-amber-600 text-white px-3 py-2 rounded-lg hover:bg-amber-700">
-                <Database size={14} /> 同年代平均をFirebaseから読み込む
-              </button>
-              <button onClick={handleSave} disabled={saving} className="flex items-center gap-1 text-sm bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50">
-                {saving ? '保存中...' : '保存'}
-              </button>
-              <button onClick={handleAiAnalysis} disabled={analysisLoading} className="flex items-center gap-1 text-sm bg-violet-600 text-white px-4 py-2 rounded-lg hover:bg-violet-700 disabled:opacity-50">
-                <Sparkles size={16} /> {analysisLoading ? '分析中...' : 'AI分析'}
-              </button>
-              <button onClick={onClose} className="p-2 rounded-lg text-slate-500 hover:bg-slate-200 hover:text-slate-700">
-                <XCircle size={20} />
-              </button>
-            </div>
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm">
+      <div className="bg-white w-full h-full flex flex-col overflow-hidden">
+
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-slate-200 bg-slate-50 flex-wrap">
+          <Award size={16} className="text-amber-500 shrink-0"/>
+          <span className="font-bold text-slate-800 text-sm shrink-0">{personName} 体力測定成績</span>
+          <div className="flex items-center gap-1 ml-1">
+            <label className="text-xs text-slate-500">年度:</label>
+            <select value={year} onChange={e => setYear(Number(e.target.value))} className="border border-slate-300 rounded px-1.5 py-0.5 text-xs">
+              {[currentYear, currentYear - 1, currentYear - 2].map(y => <option key={y} value={y}>{y}年</option>)}
+            </select>
           </div>
+          <div className="flex items-center gap-1">
+            <label className="text-xs text-slate-500">学年:</label>
+            <select value={grade} onChange={e => setGrade(e.target.value)} className="border border-slate-300 rounded px-1.5 py-0.5 text-xs">
+              <option value="">選択</option>
+              {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
+            </select>
+            {gradeFromAge && <span className="text-xs text-slate-400">（自動）</span>}
+          </div>
+          <button onClick={handleApplyAveragesFromDb} type="button" className="flex items-center gap-1 text-xs bg-amber-600 text-white px-2 py-1 rounded hover:bg-amber-700">
+            <Database size={11} /> 同年代平均読込
+          </button>
+          <button onClick={handleSave} disabled={saving} className="flex items-center gap-1 text-xs bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50 font-bold">
+            {saving ? '保存中…' : '保存'}
+          </button>
+          <button onClick={handleAiAnalysis} disabled={analysisLoading} className="flex items-center gap-1 text-xs bg-violet-600 text-white px-2 py-1 rounded hover:bg-violet-700 disabled:opacity-50">
+            <Sparkles size={11} /> {analysisLoading ? '分析中…' : 'AI分析'}
+          </button>
+          <button onClick={handlePrintScores} className="flex items-center gap-1 text-xs bg-sky-600 text-white px-2 py-1 rounded hover:bg-sky-700">
+            <FileDown size={11} /> 成績PDF
+          </button>
+          <button onClick={handlePrintComments} className="flex items-center gap-1 text-xs bg-amber-500 text-white px-2 py-1 rounded hover:bg-amber-600">
+            <FileDown size={11} /> コメントPDF
+          </button>
+          <button onClick={() => setShowExtra(v => !v)} className="flex items-center gap-1 text-xs bg-slate-200 text-slate-700 px-2 py-1 rounded hover:bg-slate-300">
+            <Sparkles size={11} /> {showExtra ? 'AI/コメント▲' : 'AI/コメント▼'}
+          </button>
+          <button onClick={onClose} className="ml-auto p-1 rounded text-slate-400 hover:bg-slate-200 hover:text-slate-700">
+            <XCircle size={18} />
+          </button>
         </div>
-        <div className="flex-shrink-0 px-4 py-4 bg-gradient-to-r from-sky-500 to-sky-600 rounded-none">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="text-white font-bold text-base flex items-center gap-2 shrink-0">
-              <Printer size={22} /> 印刷・PDFで保存
-            </span>
-            <div className="flex flex-wrap gap-3">
-              <button onClick={handlePrintScores} className="flex items-center gap-2 px-5 py-2.5 bg-white text-sky-700 rounded-lg font-bold text-sm hover:bg-sky-50 shadow-md">
-                <FileDown size={18} /> 成績表を印刷/PDF
-              </button>
-              <button onClick={handlePrintComments} className="flex items-center gap-2 px-5 py-2.5 bg-amber-400 text-slate-800 rounded-lg font-bold text-sm hover:bg-amber-300 shadow-md">
-                <FileDown size={18} /> コメントを印刷/PDF
-              </button>
+
+        <div className="flex items-center gap-x-4 gap-y-1 px-3 py-1 bg-white border-b border-slate-100 flex-wrap text-xs">
+          <span className="text-slate-500 font-medium shrink-0">測定日:</span>
+          {[0, 1, 2, 3].map(ri => (
+            <div key={ri} className="flex items-center gap-1">
+              <span className="text-slate-600 font-medium">{ri + 1}回目</span>
+              <input type="date" className="border border-slate-300 rounded px-1.5 py-0.5 text-xs" value={roundDates[ri]} onChange={e => handleRoundDateChange(ri, e.target.value)} />
             </div>
-            <span className="text-sky-100 text-xs">別タブで開き、印刷ダイアログでPDFに保存できます</span>
-          </div>
+          ))}
+          <span className="text-slate-400">|</span>
+          <span className="text-slate-500 font-medium flex items-center gap-1 shrink-0">
+            <Share2 size={11} className="text-emerald-600"/>リズム(級):
+          </span>
+          {[0, 1, 2, 3].map(ri => (
+            <div key={ri} className="flex items-center gap-0.5">
+              <span className="text-slate-500">{ri + 1}回目</span>
+              <input type="text" className="border border-slate-300 rounded px-1.5 py-0.5 text-xs w-12 text-center bg-emerald-50" placeholder="—" value={rhythmTraining?.[`q${ri + 1}`] ?? ''} onChange={e => setRhythmTraining(prev => ({ ...prev, [`q${ri + 1}`]: e.target.value }))} />
+              <span className="text-slate-500">級</span>
+            </div>
+          ))}
         </div>
-        <div className="overflow-auto flex-1 p-4">
-          <div className="mb-4 p-3 bg-slate-50 rounded-lg border border-slate-200">
-            <p className="text-xs font-bold text-slate-600 mb-2">各回の測定日（年4回の体力測定を行った日付）</p>
-            <div className="flex flex-wrap gap-4 items-center">
-              {[0, 1, 2, 3].map(ri => (
-                <div key={ri} className="flex items-center gap-2">
-                  <label className="text-sm font-medium text-slate-700">{ri + 1}回目</label>
-                  <input type="date" className="border border-slate-300 rounded px-2 py-1.5 text-sm" value={roundDates[ri]} onChange={e => handleRoundDateChange(ri, e.target.value)} />
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="mb-4 p-4 bg-emerald-50/70 rounded-lg border border-emerald-200">
-            <p className="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
-              リズム(級) リズムトレーニング
-              <span className="text-xs font-normal text-slate-500 flex items-center gap-1">
-                <Share2 size={14} className="text-emerald-600" /> 保存すると生徒の成績表に反映されます
-              </span>
-            </p>
-            <div className="flex flex-wrap gap-4 items-center">
-              {[0, 1, 2, 3].map(ri => (
-                <div key={ri} className="flex items-center gap-1.5">
-                  <input type="text" className="border border-slate-300 rounded px-3 py-2 text-sm w-20 text-center bg-white focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400" placeholder="—" value={rhythmTraining?.[`q${ri + 1}`] ?? ''} onChange={e => setRhythmTraining(prev => ({ ...prev, [`q${ri + 1}`]: e.target.value }))} />
-                  <span className="text-xs text-slate-600">級</span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <table className="w-full text-sm border-collapse" style={{ minWidth: '600px' }}>
+
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-2 py-1">
+          <table className="w-full text-xs border-collapse table-fixed">
+            <colgroup>
+              <col style={{ width: '18%' }} />
+              <col style={{ width: '20.5%' }} />
+              <col style={{ width: '20.5%' }} />
+              <col style={{ width: '20.5%' }} />
+              <col style={{ width: '20.5%' }} />
+            </colgroup>
             <thead>
               <tr>
-                <th className="border border-slate-300 p-2 bg-slate-100 font-bold text-slate-700 text-left w-36" rowSpan={2}>種目</th>
-                {[1, 2, 3, 4].map(n => (
-                  <th key={n} className="border border-slate-300 p-2 bg-slate-100 font-bold text-slate-700 text-center" colSpan={2}>{n}回目</th>
+                <th className="border border-slate-300 px-2 py-1 bg-slate-100 font-bold text-slate-700 text-left">種目</th>
+                {[0, 1, 2, 3].map(ri => (
+                  <th key={ri} className="border border-slate-300 px-1 py-1 bg-slate-100 font-bold text-slate-700 text-center">
+                    {ri + 1}回目
+                    {roundDates[ri] ? <span className="font-normal text-slate-500 text-xs ml-1">({roundDates[ri].slice(5)})</span> : ''}
+                  </th>
                 ))}
               </tr>
               <tr>
+                <th className="border border-slate-200 bg-slate-50"></th>
                 {[0, 1, 2, 3].map(ri => (
-                  <React.Fragment key={ri}>
-                    <th className="border border-slate-300 p-1.5 bg-slate-50 text-slate-600 text-center text-xs w-24">同年代平均</th>
-                    <th className="border border-slate-300 p-1.5 bg-blue-50 text-blue-800 font-bold text-center text-xs w-24">今回結果</th>
-                  </React.Fragment>
+                  <th key={ri} className="border border-slate-200 px-1 py-0.5 bg-slate-50">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-400 font-normal">平均</span>
+                      <span className="text-blue-700 font-bold">今回</span>
+                    </div>
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {fixedRows.map((item) => {
+              {[...fixedRows, ...testItems].map((item) => {
                 const unit = getUnitForItem(item);
                 return (
-                  <tr key={item.id}>
-                    <td className="border border-slate-200 p-2 bg-slate-50">
-                      <span className="font-bold text-slate-800 block">{item.category}{unit ? ` (${unit})` : ''}</span>
-                      {item.name ? <span className="text-xs text-slate-500 block">{item.name}</span> : null}
+                  <tr key={item.id} className="hover:bg-slate-50/50">
+                    <td className="border border-slate-200 px-2 py-1 bg-slate-50 align-middle">
+                      <span className="font-bold text-slate-800 leading-tight block">{item.category}</span>
+                      {item.name ? <span className="text-slate-400 block leading-tight" style={{ fontSize: '10px' }}>{item.name}</span> : null}
+                      {unit ? <span className="text-slate-400 leading-tight" style={{ fontSize: '10px' }}>（{unit}）</span> : null}
                     </td>
                     {[0, 1, 2, 3].map(ri => (
-                      <React.Fragment key={ri}>
-                        <td className="border border-slate-200 p-1">
-                          <div className="flex items-center justify-center gap-1">
-                            <input type="text" inputMode="decimal" className="flex-1 min-w-0 border border-slate-200 rounded px-2 py-1.5 text-center text-sm" placeholder="—" value={getRoundValue(ri, item.id, 'avg')} onChange={e => handleRoundChange(ri, item.id, 'avg', e.target.value)} />
-                            {unit ? <span className="text-slate-500 text-xs shrink-0">{unit}</span> : null}
+                      <td key={ri} className="border border-slate-200 px-1 py-1">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1">
+                            <span className="text-slate-400 shrink-0" style={{ fontSize: '10px', width: '22px' }}>平均</span>
+                            <input
+                              type="text" inputMode="decimal"
+                              className="flex-1 min-w-0 border border-slate-200 rounded px-1 py-0 text-center h-5 bg-white"
+                              style={{ fontSize: '11px' }}
+                              placeholder="—"
+                              value={getRoundValue(ri, item.id, 'avg')}
+                              onChange={e => handleRoundChange(ri, item.id, 'avg', e.target.value)}
+                            />
                           </div>
-                        </td>
-                        <td className="border border-slate-200 p-1 bg-blue-50/50">
-                          <div className="flex items-center justify-center gap-1">
-                            <input type="text" inputMode="decimal" className="flex-1 min-w-0 border border-blue-200 rounded px-2 py-1.5 text-center text-sm font-medium" placeholder="—" value={getRoundValue(ri, item.id, 'result')} onChange={e => handleRoundChange(ri, item.id, 'result', e.target.value)} />
-                            {unit ? <span className="text-slate-500 text-xs shrink-0">{unit}</span> : null}
+                          <div className="flex items-center gap-1">
+                            <span className="text-blue-600 font-bold shrink-0" style={{ fontSize: '10px', width: '22px' }}>今回</span>
+                            <input
+                              type="text" inputMode="decimal"
+                              className="flex-1 min-w-0 border border-blue-300 rounded px-1 py-0 text-center h-5 font-bold bg-blue-50"
+                              style={{ fontSize: '11px' }}
+                              placeholder="—"
+                              value={getRoundValue(ri, item.id, 'result')}
+                              onChange={e => handleRoundChange(ri, item.id, 'result', e.target.value)}
+                            />
                           </div>
-                        </td>
-                      </React.Fragment>
-                    ))}
-                  </tr>
-                );
-              })}
-              {testItems.map((item) => {
-                const unit = getUnitForItem(item);
-                return (
-                  <tr key={item.id}>
-                    <td className="border border-slate-200 p-2 bg-slate-50">
-                      <span className="font-bold text-slate-800 block">{item.category}{unit ? ` (${unit})` : ''}</span>
-                      <span className="text-xs text-slate-500 block">{item.name}</span>
-                    </td>
-                    {[0, 1, 2, 3].map(ri => (
-                      <React.Fragment key={ri}>
-                        <td className="border border-slate-200 p-1">
-                          <div className="flex items-center justify-center gap-1">
-                            <input type="text" inputMode="decimal" className="flex-1 min-w-0 border border-slate-200 rounded px-2 py-1.5 text-center text-sm" placeholder="—" value={getRoundValue(ri, item.id, 'avg')} onChange={e => handleRoundChange(ri, item.id, 'avg', e.target.value)} />
-                            {unit ? <span className="text-slate-500 text-xs shrink-0">{unit}</span> : null}
-                          </div>
-                        </td>
-                        <td className="border border-slate-200 p-1 bg-blue-50/50">
-                          <div className="flex items-center justify-center gap-1">
-                            <input type="text" inputMode="decimal" className="flex-1 min-w-0 border border-blue-200 rounded px-2 py-1.5 text-center text-sm font-medium" placeholder="—" value={getRoundValue(ri, item.id, 'result')} onChange={e => handleRoundChange(ri, item.id, 'result', e.target.value)} />
-                            {unit ? <span className="text-slate-500 text-xs shrink-0">{unit}</span> : null}
-                          </div>
-                        </td>
-                      </React.Fragment>
+                        </div>
+                      </td>
                     ))}
                   </tr>
                 );
               })}
             </tbody>
           </table>
-          <p className="text-xs text-slate-400 mt-3">※ 身長・体重は常に表示。その他は Firestore の test_items から取得しています。同年代平均は参考値、今回結果はその回の測定値を入力してください。</p>
-          {(analysisResult != null || analysisLoading) && (
-            <div className="mt-6 p-4 rounded-xl border border-violet-200 bg-violet-50/50">
-              <h4 className="font-bold text-slate-700 flex items-center gap-2 mb-2">
-                <Sparkles size={18} className="text-violet-600"/> AI分析
-              </h4>
-              {analysisLoading ? (
-                <p className="text-slate-500">分析中...</p>
-              ) : (
-                <>
-                  <textarea className="w-full min-h-[200px] p-3 text-sm text-slate-700 leading-relaxed border border-violet-200 rounded-lg bg-white resize-y" placeholder="AI分析の結果がここに表示されます。文章を修正してから「AI分析を保存」で反映できます。" value={analysisResult ?? ''} onChange={e => setAnalysisResult(e.target.value)} />
-                  <div className="mt-2 flex items-center gap-2 flex-wrap">
-                    <button type="button" onClick={handleSaveAnalysis} disabled={analysisSaving} className="px-4 py-2 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed">
-                      {analysisSaving ? '保存中...' : 'AI分析を保存'}
-                    </button>
-                    <span className="text-xs text-slate-500">編集した文章をFirebaseに保存します。</span>
-                  </div>
-                  <p className="text-xs text-slate-500 mt-1">※ 上の文章は自由に編集できます。編集後に「AI分析を保存」を押すとFirebaseに反映されます。</p>
-                </>
+
+          {showExtra && (
+            <div className="mt-3 space-y-3">
+              {(analysisResult != null || analysisLoading) && (
+                <div className="p-3 rounded-xl border border-violet-200 bg-violet-50/50">
+                  <h4 className="font-bold text-slate-700 flex items-center gap-2 mb-2 text-sm">
+                    <Sparkles size={15} className="text-violet-600"/> AI分析
+                  </h4>
+                  {analysisLoading ? (
+                    <p className="text-slate-500 text-sm">分析中...</p>
+                  ) : (
+                    <>
+                      <textarea className="w-full min-h-[160px] p-2 text-sm text-slate-700 leading-relaxed border border-violet-200 rounded-lg bg-white resize-y" placeholder="AI分析の結果がここに表示されます。" value={analysisResult ?? ''} onChange={e => setAnalysisResult(e.target.value)} />
+                      <div className="mt-2 flex items-center gap-2">
+                        <button type="button" onClick={handleSaveAnalysis} disabled={analysisSaving} className="px-3 py-1 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 disabled:opacity-50">
+                          {analysisSaving ? '保存中...' : 'AI分析を保存'}
+                        </button>
+                        <span className="text-xs text-slate-500">編集後に保存でFirebaseに反映</span>
+                      </div>
+                    </>
+                  )}
+                </div>
               )}
-              <p className="text-xs text-slate-400 mt-2">※ 入力データはOpenAI APIに送信されます。APIキーは .env の VITE_OPENAI_API_KEY で設定してください。</p>
+              <div className="p-3 rounded-xl border border-sky-200 bg-sky-50/50">
+                <h4 className="font-bold text-slate-700 mb-2 text-sm">インストラクターからの一言</h4>
+                <textarea className="w-full min-h-[100px] p-2 text-sm text-slate-700 leading-relaxed border border-sky-200 rounded-lg bg-white resize-y" placeholder="保護者やお子さんへ伝えたいことを自由に書けます。" value={instructorComment ?? ''} onChange={e => setInstructorComment(e.target.value)} />
+                <p className="text-xs text-slate-500 mt-1">※ ヘッダーの「保存」でFirebaseに保存されます。</p>
+              </div>
             </div>
           )}
-          <div className="mt-6 p-4 rounded-xl border border-sky-200 bg-sky-50/50">
-            <h4 className="font-bold text-slate-700 mb-2">インストラクターからの一言</h4>
-            <textarea className="w-full min-h-[120px] p-3 text-sm text-slate-700 leading-relaxed border border-sky-200 rounded-lg bg-white resize-y" placeholder="保護者やお子さんへ伝えたいことを自由に書けます。保存またはAI分析を保存で反映されます。" value={instructorComment ?? ''} onChange={e => setInstructorComment(e.target.value)} />
-            <p className="text-xs text-slate-500 mt-1">※ 自由記述です。ヘッダーの「保存」または「AI分析を保存」でFirebaseに保存されます。</p>
-          </div>
         </div>
       </div>
     </div>

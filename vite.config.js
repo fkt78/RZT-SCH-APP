@@ -31,7 +31,7 @@ export default defineConfig({
   ],
   server: {
     host: 'localhost',
-    port: 9010,
+    port: 7001,
     strictPort: false
   },
   build: {
