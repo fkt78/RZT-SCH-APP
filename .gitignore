@@ -3,4 +3,5 @@ dist/
 .firebase/
 .env
 .env.local
+functions/.env
 .DS_Store

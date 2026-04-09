@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import { getApp } from 'firebase/app';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { collection, doc, getDoc, getDocs, setDoc, serverTimestamp, query, orderBy, where } from 'firebase/firestore';
 import { Award, Database, Sparkles, XCircle, Printer, FileDown, Share2 } from 'lucide-react';
+import toast from 'react-hot-toast';
+
+const FUNCTIONS_REGION = 'asia-northeast1';
 
 // 学年ドロップダウン用オプション（小1〜高3、幼稚園含む）
 const GRADE_OPTIONS = ['小6', '小5', '小4', '小3', '小2', '小1', '年中', '年長', '年少', '中1', '中2', '中3', '高1', '高2', '高3'];
@@ -19,6 +24,68 @@ const getUnitForItem = (item) => {
   if (/片足閉眼|バランス/.test(n)) return '秒';
   if (/リズム/.test(n)) return '回';
   return '';
+};
+
+/** 種目に応じた入力の min/max（type="number" 用・保存時バリデーションと一致） */
+const getNumericBoundsForItem = (item) => {
+  if (item.id === '_height') return { min: 50, max: 250 };
+  if (item.id === '_weight') return { min: 10, max: 200 };
+  const n = (item.name || '') + (item.category || '');
+  if (/バランス|片足閉眼/.test(n)) return { min: 0, max: 600 };
+  if (/ラン|mラン|タイム/.test(n)) return { min: 0, max: 600 };
+  if (/腹筋/.test(n)) return { min: 0, max: 500 };
+  if (/幅跳び|長座体前屈/.test(n)) return { min: 0, max: 500 };
+  if (/プレイズ|反射神経/.test(n)) return { min: 0, max: 600 };
+  if (/リズム/.test(n)) return { min: 0, max: 500 };
+  return { min: 0, max: 10000 };
+};
+
+const parseNumericField = (raw) => {
+  if (raw == null || String(raw).trim() === '') return null;
+  const n = Number(String(raw).replace(/,/g, ''));
+  if (!Number.isFinite(n)) return NaN;
+  return n;
+};
+
+/** type="number" 用。不正な既存値は空表示 */
+const toNumberInputValue = (raw) => {
+  if (raw == null || String(raw).trim() === '') return '';
+  const n = parseNumericField(raw);
+  return Number.isFinite(n) ? String(raw).replace(/,/g, '') : '';
+};
+
+/** 入力済みの数値がすべて有限かつ min/max 内なら true。空欄はスキップ */
+const validateFitnessNumericFields = (rounds, rows) => {
+  for (let ri = 0; ri < 4; ri++) {
+    const round = rounds[ri] || {};
+    for (const item of rows) {
+      const cell = round[item.id];
+      if (!cell) continue;
+      const { min, max } = getNumericBoundsForItem(item);
+      for (const field of ['avg', 'result']) {
+        const raw = cell[field];
+        if (raw == null || String(raw).trim() === '') continue;
+        const v = parseNumericField(raw);
+        if (!Number.isFinite(v)) return false;
+        if (v < min || v > max) return false;
+      }
+    }
+  }
+  return true;
+};
+
+const normalizeRoundCellForSave = (cell) => {
+  if (!cell || typeof cell !== 'object') return cell;
+  const next = { ...cell };
+  for (const field of ['avg', 'result']) {
+    const raw = next[field];
+    if (raw == null || String(raw).trim() === '') next[field] = '';
+    else {
+      const n = parseNumericField(raw);
+      next[field] = Number.isFinite(n) ? n : '';
+    }
+  }
+  return next;
 };
 
 const getAgeAsOfApril1 = (birthDate, schoolYear) => {
@@ -216,7 +283,7 @@ export default function FitnessTestModal({ personName, db, onClose }) {
   const handleApplyAveragesFromDb = () => {
     const { byItemKey = {}, byItemId = {} } = itemAveragesFromDb;
     if (Object.keys(byItemKey).length === 0 && Object.keys(byItemId).length === 0) {
-      alert('学年を選んでから「同年代平均をFirebaseから読み込む」を押すか、先に「同年代平均を読み込む」で取得してください。');
+      toast.error('学年を選んでから「同年代平均をFirebaseから読み込む」を押すか、先に「同年代平均を読み込む」で取得してください。');
       return;
     }
     const getAvgForItem = (item) => {
@@ -246,7 +313,7 @@ export default function FitnessTestModal({ personName, db, onClose }) {
       });
       return nextRound;
     }));
-    alert('同年代平均をFirebaseの値で反映しました。');
+    toast.success('同年代平均をFirebaseの値で反映しました。');
   };
 
   const fixedRows = [{ id: '_height', category: '身長', name: '' }, { id: '_weight', category: '体重', name: '' }];
@@ -258,14 +325,12 @@ export default function FitnessTestModal({ personName, db, onClose }) {
     try {
       const ref = doc(db, 'fitness_results', docId);
       await setDoc(ref, { analysisResult: analysisResult ?? '', analysisResultAt: serverTimestamp(), instructorComment: instructorComment ?? '' }, { merge: true });
-      alert('AI分析を保存しました。');
-    } catch (e) { alert('AI分析の保存に失敗しました: ' + e.message); }
+      toast.success('AI分析を保存しました。');
+    } catch (e) { toast.error('AI分析の保存に失敗しました: ' + e.message); }
     setAnalysisSaving(false);
   };
 
   const handleAiAnalysis = async () => {
-    const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-    if (!apiKey) { alert('AI分析を使うには、.env に VITE_OPENAI_API_KEY を設定してください。'); return; }
     const lines = [];
     lines.push(`${personName} さん ${year}年度 体力測定データ`);
     lines.push('【数値の意味】「平均」＝同年代平均（参考値・その子の過去の値ではない）。「今回」＝その子本人のその回の測定値（実測値）。「伸びた／増えた」は必ず「今回」どうしの比較のみ。平均と今回を混ぜて伸びの計算をしないこと。');
@@ -282,49 +347,47 @@ export default function FitnessTestModal({ personName, db, onClose }) {
     });
     const dataText = lines.join('\n');
     if (!dataText.trim() || lines.length <= 2) {
-      alert('分析するには、少なくとも1種目以上に数値を入力してください。');
+      toast.error('分析するには、少なくとも1種目以上に数値を入力してください。');
       return;
     }
     setAnalysisLoading(true);
     setAnalysisResult(null);
     try {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: `あなたは児童・生徒の体力測定を分析し、その結果を**お母さん（保護者）に渡す文章**を書く専門家です。読み手は「わが子の様子を知りたいお母さん」です。お母さんが読んで「この子、ここ伸びてるんだな」「ここはこれからだな」と、**感情的にすっと伝わる・心に残る**文章にしてください。EQを高く、子どもに寄り添い、お母さんにも寄り添うトーンで書いてください。
-
-【誰のための文章か】
-・この分析は**お母さんに見せる**ためのものです。お母さんが「うれしい」「安心した」「ここを応援してあげよう」と自然に思えるように、種目ごとの「伸びているところ」と「もう少し伸ばしたいところ」が感情的に伝わるように書いてください。
-
-【最重要：平均値と測定値は別物】
-・**平均**＝同年代平均＝「その学年・年代の参考値」であり、**その子の過去の値ではない**。
-・**今回**＝本人の測定値＝「その子自身がその回に計った値」だけを指す。成長や「伸びた」を語るときに使ってよいのは**この「今回」の時系列だけ**です。
-・「伸びている」「○cm伸びた」は、**必ず「今回」だけ**を比較して書く。本人の測定値どうしの差だけ。` },
-            { role: 'user', content: dataText }
-          ],
-          max_tokens: 1000,
-          temperature: 0.3
-        })
+      const generateFitnessAnalysis = httpsCallable(
+        getFunctions(getApp(), FUNCTIONS_REGION),
+        'generateFitnessAnalysis'
+      );
+      const callResult = await generateFitnessAnalysis({
+        studentName: personName,
+        schoolYear: year,
+        grade: grade || '',
+        dataText,
       });
-      const json = await res.json();
-      if (json.error) throw new Error(json.error.message || 'APIエラー');
-      const text = json.choices?.[0]?.message?.content?.trim();
-      const resultText = text || '分析結果を取得できませんでした。';
+      const resultText =
+        callResult.data?.analysisText != null
+          ? String(callResult.data.analysisText).trim()
+          : '分析結果を取得できませんでした。';
       setAnalysisResult(resultText);
       try {
         const ref = doc(db, 'fitness_results', docId);
         await setDoc(ref, { analysisResult: resultText, analysisResultAt: serverTimestamp() }, { merge: true });
-        alert('AI分析を実行し、結果をFirebaseに保存しました。');
+        toast.success('AI分析を実行し、結果をFirebaseに保存しました。');
       } catch (saveErr) {
         console.error('AI分析結果の保存エラー:', saveErr);
-        alert('AI分析結果のFirebase保存に失敗しました: ' + (saveErr?.message || String(saveErr)));
+        toast.error('AI分析結果のFirebase保存に失敗しました: ' + (saveErr?.message || String(saveErr)));
       }
     } catch (e) {
       console.error(e);
-      setAnalysisResult('分析に失敗しました: ' + (e.message || String(e)));
+      const code = e?.code;
+      let msg = e?.message || String(e);
+      if (code === 'functions/failed-precondition') {
+        msg = 'サーバーに OpenAI API キーが設定されていません。functions/.env または本番の環境変数を管理者が設定してください。';
+      } else if (code === 'functions/unauthenticated') {
+        msg = 'ログインが必要です。再度ログインしてからお試しください。';
+      } else if (code === 'functions/invalid-argument') {
+        msg = e.message || '入力データが不正です。';
+      }
+      setAnalysisResult('分析に失敗しました: ' + msg);
     }
     setAnalysisLoading(false);
   };
@@ -339,7 +402,7 @@ export default function FitnessTestModal({ personName, db, onClose }) {
     const hasRoundData = (ri) => roundDates[ri] || Object.values(rounds[ri] || {}).some(v => v && v.result !== '' && v.result != null);
     const activeRounds = [0, 1, 2, 3].filter(hasRoundData);
     const hasRhythm = rhythmTraining && (rhythmTraining.q1 || rhythmTraining.q2 || rhythmTraining.q3 || rhythmTraining.q4);
-    if (activeRounds.length === 0 && !hasRhythm) { alert('印刷できる成績データがありません。'); return; }
+    if (activeRounds.length === 0 && !hasRhythm) { toast.error('印刷できる成績データがありません。'); return; }
     const roundIndices = activeRounds.length > 0 ? activeRounds : [];
     const fixedRows = [{ id: '_height', category: '身長', name: '' }, { id: '_weight', category: '体重', name: '' }];
     const allRows = [...fixedRows, ...testItems];
@@ -375,7 +438,7 @@ export default function FitnessTestModal({ personName, db, onClose }) {
   const handlePrintComments = () => {
     const hasAi = analysisResult && String(analysisResult).trim() !== '';
     const hasInstructor = instructorComment && String(instructorComment).trim() !== '';
-    if (!hasAi && !hasInstructor) { alert('印刷できるコメントがありません。'); return; }
+    if (!hasAi && !hasInstructor) { toast.error('印刷できるコメントがありません。'); return; }
     const safeName = escapeHtml(personName || '');
     let body = '';
     if (hasAi) body += '<div style="margin-bottom:24px;"><h3 style="font-size:16px;margin:0 0 8px;color:#6d28d9;">AI分析</h3><div style="white-space:pre-wrap;line-height:1.8;font-size:14px;color:#334155;">' + escapeHtml(analysisResult) + '</div></div>';
@@ -386,12 +449,24 @@ export default function FitnessTestModal({ personName, db, onClose }) {
   };
 
   const handleSave = async () => {
+    const rowsForValidation = [...fixedRows, ...testItems];
+    if (!validateFitnessNumericFields(rounds, rowsForValidation)) {
+      toast.error('数値を正しく入力してください');
+      return;
+    }
     setSaving(true);
     try {
       const ref = doc(db, 'fitness_results', docId);
+      const normalizedRounds = rounds.map((round) => {
+        const out = {};
+        for (const itemId of Object.keys(round || {})) {
+          out[itemId] = normalizeRoundCellForSave(round[itemId]);
+        }
+        return out;
+      });
       const payload = {
         name: personName, year,
-        round1: rounds[0], round2: rounds[1], round3: rounds[2], round4: rounds[3],
+        round1: normalizedRounds[0], round2: normalizedRounds[1], round3: normalizedRounds[2], round4: normalizedRounds[3],
         round1Date: roundDates[0] || null, round2Date: roundDates[1] || null, round3Date: roundDates[2] || null, round4Date: roundDates[3] || null,
         updatedAt: serverTimestamp()
       };
@@ -402,8 +477,8 @@ export default function FitnessTestModal({ personName, db, onClose }) {
         q3: (rhythmTraining?.q3 ?? '').trim(), q4: (rhythmTraining?.q4 ?? '').trim()
       };
       await setDoc(ref, payload, { merge: true });
-      alert('保存しました。リズムトレーニングの級は生徒の成績表に反映されます。' + (analysisResult ? '（AI分析結果も保存しました）' : ''));
-    } catch (e) { alert('保存に失敗しました: ' + e.message); }
+      toast.success('保存しました。リズムトレーニングの級は生徒の成績表に反映されます。' + (analysisResult ? '（AI分析結果も保存しました）' : ''));
+    } catch (e) { toast.error('保存に失敗しました: ' + e.message); }
     setSaving(false);
   };
 
@@ -523,34 +598,42 @@ export default function FitnessTestModal({ personName, db, onClose }) {
                       {item.name ? <span className="text-slate-400 block leading-tight" style={{ fontSize: '10px' }}>{item.name}</span> : null}
                       {unit ? <span className="text-slate-400 leading-tight" style={{ fontSize: '10px' }}>（{unit}）</span> : null}
                     </td>
-                    {[0, 1, 2, 3].map(ri => (
+                    {[0, 1, 2, 3].map(ri => {
+                      const { min, max } = getNumericBoundsForItem(item);
+                      return (
                       <td key={ri} className="border border-slate-200 px-1 py-1">
                         <div className="space-y-1">
                           <div className="flex items-center gap-1">
                             <span className="text-slate-400 shrink-0" style={{ fontSize: '10px', width: '22px' }}>平均</span>
                             <input
-                              type="text" inputMode="decimal"
+                              type="number"
+                              min={min}
+                              max={max}
+                              step="any"
                               className="flex-1 min-w-0 border border-slate-200 rounded px-1 py-0 text-center h-5 bg-white"
                               style={{ fontSize: '11px' }}
                               placeholder="—"
-                              value={getRoundValue(ri, item.id, 'avg')}
+                              value={toNumberInputValue(getRoundValue(ri, item.id, 'avg'))}
                               onChange={e => handleRoundChange(ri, item.id, 'avg', e.target.value)}
                             />
                           </div>
                           <div className="flex items-center gap-1">
                             <span className="text-blue-600 font-bold shrink-0" style={{ fontSize: '10px', width: '22px' }}>今回</span>
                             <input
-                              type="text" inputMode="decimal"
+                              type="number"
+                              min={min}
+                              max={max}
+                              step="any"
                               className="flex-1 min-w-0 border border-blue-300 rounded px-1 py-0 text-center h-5 font-bold bg-blue-50"
                               style={{ fontSize: '11px' }}
                               placeholder="—"
-                              value={getRoundValue(ri, item.id, 'result')}
+                              value={toNumberInputValue(getRoundValue(ri, item.id, 'result'))}
                               onChange={e => handleRoundChange(ri, item.id, 'result', e.target.value)}
                             />
                           </div>
                         </div>
                       </td>
-                    ))}
+                    );})}
                   </tr>
                 );
               })}
