@@ -2,7 +2,15 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
+/** デプロイ日（ビルド実行日）。CI で固定したい場合は環境変数で上書き可 */
+const deployDate =
+  process.env.VITE_DEPLOY_DATE?.trim() ||
+  new Date().toISOString().slice(0, 10)
+
 export default defineConfig({
+  define: {
+    'import.meta.env.VITE_DEPLOY_DATE': JSON.stringify(deployDate),
+  },
   plugins: [
     react(),
     VitePWA({

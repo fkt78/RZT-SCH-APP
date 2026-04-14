@@ -2,9 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { Activity, User, Settings } from 'lucide-react';
 import toast from 'react-hot-toast';
-import packageInfo from '../../package.json';
-
-const APP_VERSION = packageInfo.version;
+import { APP_VERSION_LABEL } from '../appVersion';
 
 export default function LoginScreen({ onLogin, db }) {
   const [students, setStudents] = useState([]);
@@ -160,7 +158,7 @@ export default function LoginScreen({ onLogin, db }) {
         <p className="text-slate-500 mb-6 text-center">レッスン日程・出欠共有アプリ</p>
         <div className="mb-6 flex justify-center">
           <span className="text-xs font-semibold text-slate-600 bg-slate-100 border border-slate-200 px-3 py-1 rounded-full">
-            現在のバージョン: v{APP_VERSION}
+            現在のバージョン: {APP_VERSION_LABEL}
           </span>
         </div>
 

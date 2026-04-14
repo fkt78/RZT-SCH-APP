@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import packageInfo from '../package.json';
 import { verifyStudentPassword } from './studentPasswordCrypto';
+import { APP_VERSION_LABEL } from './appVersion';
 import { initializeApp } from "firebase/app";
 import {
   getFirestore, collection, doc, getDoc, getDocs, setDoc, serverTimestamp
@@ -34,7 +34,6 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
-const APP_VERSION = packageInfo.version;
 // リロード時に必ずログイン画面から開始したいので、永続化しない設定にする
 setPersistence(auth, inMemoryPersistence).catch((error) => {
   console.error("認証永続化設定エラー:", error);
@@ -163,6 +162,10 @@ function AppShell() {
         const hasPassword = storedPassword != null && String(storedPassword).trim() !== '';
         if (!hasPassword) {
           toast.error('この生徒にはパスワードが設定されていません。管理者に連絡してください。');
+          return;
+        }
+        if (!studentPassword || String(studentPassword).trim() === '') {
+          toast.error('パスワードを入力してください');
           return;
         }
         const inputTrimmed = String(studentPassword ?? '').trim();
@@ -455,7 +458,7 @@ const Header = ({ activeTab, userProfile }) => {
       </h2>
       <div className="flex items-center gap-2">
         <div className="text-[11px] text-slate-500 font-semibold bg-slate-100 px-2 py-1 rounded-full">
-          v{APP_VERSION}
+          {APP_VERSION_LABEL}
         </div>
         <button
           onClick={handleRefresh}
