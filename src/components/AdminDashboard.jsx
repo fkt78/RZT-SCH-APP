@@ -12,10 +12,13 @@ import EventEditorModal from '../EventEditorModal';
 import FitnessTestModal from '../FitnessTestModal';
 import FitnessGraphModal from './FitnessGraphModal';
 import { schedulesInWindowQuery } from '../scheduleQueryWindow';
+import { getStudentDisplayName, normalizeStudentNameKey } from '../studentDisplayName';
 
 export default function AdminDashboard({ db, user }) {
   const [adminSubTab, setAdminSubTab] = useState('main'); // 'main' | 'grades' 成績表
   const [events, setEvents] = useState([]);
+  /** 成績表の氏名行: Firestore `students` と同一メンバー */
+  const [studentDisplayNames, setStudentDisplayNames] = useState([]);
   const [notice, setNotice] = useState("");
   const [currentDate, setCurrentDate] = useState(new Date());
   
@@ -87,6 +90,27 @@ export default function AdminDashboard({ db, user }) {
     return () => {
       unsub();
     };
+  }, [db]);
+
+  useEffect(() => {
+    const q = collection(db, 'students');
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        const names = [];
+        snapshot.docs.forEach((d) => {
+          const n = getStudentDisplayName(d.data());
+          if (n) names.push(n);
+        });
+        const unique = [...new Set(names)];
+        unique.sort((a, b) => a.localeCompare(b, 'ja'));
+        setStudentDisplayNames(unique);
+      },
+      (error) => {
+        console.error('students（成績表用）取得エラー:', error);
+      }
+    );
+    return () => unsub();
   }, [db]);
 
   const handleUpdateNotice = async () => {
@@ -206,7 +230,12 @@ export default function AdminDashboard({ db, user }) {
       </div>
 
       {adminSubTab === 'grades' && (
-        <AdminGradeSheet db={db} events={events} getUniqueAttendees={getUniqueAttendees} />
+        <AdminGradeSheet
+          db={db}
+          events={events}
+          getUniqueAttendees={getUniqueAttendees}
+          studentDisplayNames={studentDisplayNames}
+        />
       )}
 
       {adminSubTab === 'main' && (
@@ -343,7 +372,7 @@ export default function AdminDashboard({ db, user }) {
 // ==========================================
 // 📊 成績表（管理者用）
 // ==========================================
-function AdminGradeSheet({ db, events, getUniqueAttendees }) {
+function AdminGradeSheet({ db, events, getUniqueAttendees, studentDisplayNames }) {
   const [filterMonth, setFilterMonth] = useState(null); // null = 全期間
   const [selectedPerson, setSelectedPerson] = useState(null); // クリックした氏名 → 体力測定入力モーダル用
   const [selectedPersonForGraph, setSelectedPersonForGraph] = useState(null); // グラフ表示モーダル用
@@ -354,22 +383,27 @@ function AdminGradeSheet({ db, events, getUniqueAttendees }) {
       : events
   ), [events, filterMonth]);
 
-  // 成績集計: 氏名 -> { name, ok, ng, maybe }
+  // schedules の出欠を正規化キーで集計（students の表示名と突き合わせ）
   const stats = React.useMemo(() => {
-    const map = new Map();
-    targetEvents.forEach(event => {
+    const byNorm = new Map();
+    targetEvents.forEach((event) => {
       const attendees = getUniqueAttendees(event.attendees || []);
-      attendees.forEach(a => {
+      attendees.forEach((a) => {
         if (!a?.name) return;
-        if (!map.has(a.name)) map.set(a.name, { name: a.name, ok: 0, ng: 0, maybe: 0 });
-        const row = map.get(a.name);
+        const k = normalizeStudentNameKey(a.name);
+        if (!byNorm.has(k)) byNorm.set(k, { ok: 0, ng: 0, maybe: 0 });
+        const row = byNorm.get(k);
         if (a.status === 'ok') row.ok += 1;
         else if (a.status === 'ng') row.ng += 1;
         else if (a.status === 'maybe') row.maybe += 1;
       });
     });
-    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'ja'));
-  }, [targetEvents, getUniqueAttendees]);
+    return studentDisplayNames.map((displayName) => {
+      const k = normalizeStudentNameKey(displayName);
+      const c = byNorm.get(k) || { ok: 0, ng: 0, maybe: 0 };
+      return { name: displayName, ok: c.ok, ng: c.ng, maybe: c.maybe };
+    });
+  }, [targetEvents, getUniqueAttendees, studentDisplayNames]);
 
   const totalEvents = targetEvents.length;
 
@@ -435,7 +469,13 @@ function AdminGradeSheet({ db, events, getUniqueAttendees }) {
           </thead>
           <tbody>
             {stats.length === 0 ? (
-              <tr><td colSpan={6} className="p-6 text-center text-slate-400">データがありません</td></tr>
+              <tr>
+                <td colSpan={6} className="p-6 text-center text-slate-400">
+                  {(!studentDisplayNames || studentDisplayNames.length === 0)
+                    ? '生徒マスタ（Firestore の students）に登録がありません。'
+                    : '表示するデータがありません。'}
+                </td>
+              </tr>
             ) : (
               stats.map((row, i) => {
                 const total = row.ok + row.ng + row.maybe;
