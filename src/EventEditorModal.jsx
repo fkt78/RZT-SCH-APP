@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { collection, addDoc, doc, updateDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { Plus, Edit3 } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 export default function EventEditorModal({ isOpen, onClose, event, date, db, user }) {
   const [title, setTitle] = useState(event?.title || 'レッスン');
@@ -22,6 +23,8 @@ export default function EventEditorModal({ isOpen, onClose, event, date, db, use
     event ? `${String(event.end.getHours()).padStart(2,'0')}:${String(event.end.getMinutes()).padStart(2,'0')}` : '18:00'
   );
   const [location, setLocation] = useState(event?.location || '');
+  const eventRef = useRef(event);
+  eventRef.current = event;
 
   useEffect(() => {
     const q = collection(db, "locations");
@@ -43,13 +46,23 @@ export default function EventEditorModal({ isOpen, onClose, event, date, db, use
       const uniqueLocations = [...new Set(locationList)];
       uniqueLocations.sort((a, b) => a.localeCompare(b, 'ja'));
       setLocations(uniqueLocations);
-      if (!event && uniqueLocations.length > 0 && !location) setLocation(uniqueLocations[0]);
+      if (!eventRef.current && uniqueLocations.length > 0) {
+        setLocation((prev) => (prev && String(prev).trim() !== '' ? prev : uniqueLocations[0]));
+      }
     }, (error) => console.error("場所データ取得エラー:", error));
     return () => unsubscribe();
-  }, [db, event, location]);
+  }, [db]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!title.trim()) {
+      toast.error('タイトルを入力してください');
+      return;
+    }
+    if (!location || !String(location).trim()) {
+      toast.error('場所を選択または入力してください');
+      return;
+    }
     const [y, m, d] = targetDate.split('-').map(Number);
     const start = new Date(y, m - 1, d);
     const [sh, sm] = startTime.split(':');
@@ -58,12 +71,17 @@ export default function EventEditorModal({ isOpen, onClose, event, date, db, use
     const [eh, em] = endTime.split(':');
     end.setHours(Number(eh), Number(em), 0, 0);
     const data = { title, start, end, location, creatorId: user.uid, updatedAt: serverTimestamp() };
-    if (event) {
-      await updateDoc(doc(db, "schedules", event.id), data);
-    } else {
-      await addDoc(collection(db, "schedules"), { ...data, createdAt: serverTimestamp(), attendees: [] });
+    try {
+      if (event) {
+        await updateDoc(doc(db, "schedules", event.id), data);
+      } else {
+        await addDoc(collection(db, "schedules"), { ...data, createdAt: serverTimestamp(), attendees: [] });
+      }
+      onClose();
+    } catch (err) {
+      console.error('イベント保存エラー:', err);
+      toast.error('保存に失敗しました。もう一度お試しください。');
     }
-    onClose();
   };
 
   if (!isOpen) return null;

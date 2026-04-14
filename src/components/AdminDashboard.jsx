@@ -28,10 +28,13 @@ export default function AdminDashboard({ db, user }) {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const getUniqueAttendees = (attendees) => {
     const uniqueMap = new Map();
+    if (!Array.isArray(attendees)) return [];
     attendees.forEach((attendee) => {
-      if (!attendee?.name) return;
-      if (!uniqueMap.has(attendee.name)) {
-        uniqueMap.set(attendee.name, attendee);
+      if (!attendee?.name && !attendee?.uid) return;
+      const key = attendee.uid || attendee.name;
+      if (!key) return;
+      if (!uniqueMap.has(key)) {
+        uniqueMap.set(key, attendee);
       }
     });
     return Array.from(uniqueMap.values());
@@ -52,17 +55,20 @@ export default function AdminDashboard({ db, user }) {
   };
   const dedupeAttendeesByName = (attendees) => {
     const uniqueMap = new Map();
+    if (!Array.isArray(attendees)) return [];
     attendees.forEach((attendee) => {
-      if (!attendee?.name) return;
-      const existing = uniqueMap.get(attendee.name);
+      if (!attendee?.name && !attendee?.uid) return;
+      const key = attendee.uid || attendee.name;
+      if (!key) return;
+      const existing = uniqueMap.get(key);
       if (!existing) {
-        uniqueMap.set(attendee.name, attendee);
+        uniqueMap.set(key, attendee);
         return;
       }
       const currentValue = getUpdatedAtValue(attendee);
       const existingValue = getUpdatedAtValue(existing);
       if (currentValue >= existingValue) {
-        uniqueMap.set(attendee.name, attendee);
+        uniqueMap.set(key, attendee);
       }
     });
     return Array.from(uniqueMap.values());
@@ -85,7 +91,9 @@ export default function AdminDashboard({ db, user }) {
       }
     );
     const noticeRef = doc(db, "sys_settings", "monthly_notice");
-    getDoc(noticeRef).then(s => s.exists() && setNotice(s.data().content));
+    getDoc(noticeRef)
+      .then(s => s.exists() && setNotice(s.data().content))
+      .catch(err => console.error('お知らせ読み込みエラー:', err));
 
     return () => {
       unsub();
@@ -125,7 +133,7 @@ export default function AdminDashboard({ db, user }) {
   const handleExportCSV = (event) => {
     // CSV Data Generation
     const headers = ["氏名", "出欠状況", "更新日時"];
-    const rows = getUniqueAttendees(event.attendees).map(a => {
+    const rows = getUniqueAttendees(event.attendees || []).map(a => {
       let status = "未回答";
       if (a.status === 'ok') status = "参加";
       if (a.status === 'ng') status = "不参加";
@@ -307,7 +315,7 @@ export default function AdminDashboard({ db, user }) {
       
       <div className="space-y-4">
         {events.map(event => {
-          const uniqueAttendees = getUniqueAttendees(event.attendees);
+          const uniqueAttendees = getUniqueAttendees(event.attendees || []);
           const okCount = uniqueAttendees.filter(a => a.status === 'ok').length;
           const ngCount = uniqueAttendees.filter(a => a.status === 'ng').length;
           const maybeCount = uniqueAttendees.filter(a => a.status === 'maybe').length;

@@ -19,15 +19,15 @@ import StudentGradesView from './components/StudentGradesView';
 import AdminDashboard from './components/AdminDashboard';
 import ErrorBoundary from './components/ErrorBoundary';
 
-// --- 1. Firebase Configuration ---
+// --- 1. Firebase Configuration（.env.example をコピーして .env.local を作成）
 const firebaseConfig = {
-  apiKey: "AIzaSyCO4HcceGbMowW3O27a52NcslEuz-H1jdA",
-  authDomain: "rizutore-6adb2.firebaseapp.com",
-  projectId: "rizutore-6adb2",
-  storageBucket: "rizutore-6adb2.firebasestorage.app",
-  messagingSenderId: "787141528970",
-  appId: "1:787141528970:web:87c073d27fee57206d4c73",
-  measurementId: "G-EWLQHZ42FN"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
 // Initialize Firebase
@@ -50,29 +50,35 @@ function AppShell() {
   const [pendingInstructorName, setPendingInstructorName] = useState(null);
   const [updateAvailable, setUpdateAvailable] = useState(false);
 
-  // Service Worker の更新を監視
+  // Service Worker の更新を監視（アンマウント時に interval を解除）
   useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.ready.then((registration) => {
-        // 定期的に更新をチェック（1分ごと）
-        setInterval(() => {
-          registration.update();
-        }, 60 * 1000);
+    if (!('serviceWorker' in navigator)) return;
 
-        // 更新が見つかった時
-        registration.addEventListener('updatefound', () => {
-          const newWorker = registration.installing;
-          if (newWorker) {
-            newWorker.addEventListener('statechange', () => {
-              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                // 新しいバージョンが利用可能
-                setUpdateAvailable(true);
-              }
-            });
-          }
-        });
+    let intervalId = null;
+    let cancelled = false;
+
+    navigator.serviceWorker.ready.then((registration) => {
+      if (cancelled) return;
+      intervalId = setInterval(() => {
+        registration.update();
+      }, 60 * 1000);
+
+      registration.addEventListener('updatefound', () => {
+        const newWorker = registration.installing;
+        if (newWorker) {
+          newWorker.addEventListener('statechange', () => {
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              setUpdateAvailable(true);
+            }
+          });
+        }
       });
-    }
+    });
+
+    return () => {
+      cancelled = true;
+      if (intervalId != null) clearInterval(intervalId);
+    };
   }, []);
 
   // Auth Observer

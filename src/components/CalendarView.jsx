@@ -317,15 +317,18 @@ export default function CalendarView({ db, user, userProfile }) {
 // 参加登録用モーダルコンポーネント
 function ParticipationModal({ event, onClose, db, user, userProfile }) {
   const isAdmin = userProfile?.role === 'admin';
+  const attendees = event.attendees || [];
   const myStatus = isAdmin
-    ? event.attendees.find(a => a.uid === user.uid)?.status
-    : event.attendees.find(a => a.name === userProfile?.name)?.status;
+    ? (user?.uid ? attendees.find(a => a.uid === user.uid)?.status : undefined)
+    : (userProfile?.name ? attendees.find(a => a.name === userProfile.name)?.status : undefined);
   const uniqueOkAttendees = (() => {
-    const okAttendees = event.attendees.filter(a => a.status === 'ok');
+    const okAttendees = attendees.filter(a => a.status === 'ok');
     const uniqueMap = new Map();
     okAttendees.forEach((attendee) => {
-      if (!uniqueMap.has(attendee.name)) {
-        uniqueMap.set(attendee.name, attendee);
+      const key = attendee.uid || attendee.name;
+      if (!key) return;
+      if (!uniqueMap.has(key)) {
+        uniqueMap.set(key, attendee);
       }
     });
     return Array.from(uniqueMap.values());
@@ -338,8 +341,8 @@ function ParticipationModal({ event, onClose, db, user, userProfile }) {
     try {
       const docRef = doc(db, "schedules", event.id);
       const others = isAdmin
-        ? event.attendees.filter(a => a.uid !== user.uid)
-        : event.attendees.filter(a => a.name !== userProfile?.name);
+        ? attendees.filter(a => a.uid !== user.uid)
+        : attendees.filter(a => a.name !== userProfile?.name);
       await updateDoc(docRef, { attendees: [...others, newEntry] });
     } catch (err) { toast.error(err.message); }
   };

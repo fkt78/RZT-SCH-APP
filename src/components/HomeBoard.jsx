@@ -48,6 +48,8 @@ export default function HomeBoard({ db, user, userProfile }) {
     const noticeRef = doc(db, "sys_settings", "monthly_notice");
     getDoc(noticeRef).then(snap => {
       if (snap.exists()) setNotice(snap.data().content);
+    }).catch((err) => {
+      console.error('お知らせ読み込みエラー:', err);
     });
 
     return () => unsub();
@@ -60,9 +62,10 @@ export default function HomeBoard({ db, user, userProfile }) {
     try {
       const docRef = doc(db, "schedules", event.id);
       const isAdmin = userProfile?.role === 'admin';
+      const attendees = Array.isArray(event.attendees) ? event.attendees : [];
       const others = isAdmin
-        ? event.attendees.filter(a => a.uid !== user.uid)
-        : event.attendees.filter(a => a.name !== userProfile?.name);
+        ? attendees.filter(a => a.uid !== user.uid)
+        : attendees.filter(a => a.name !== userProfile?.name);
       await updateDoc(docRef, { attendees: [...others, newEntry] });
     } catch (err) { toast.error(err.message); }
   };
@@ -92,9 +95,10 @@ export default function HomeBoard({ db, user, userProfile }) {
 
           {events.map(event => {
             const isAdmin = userProfile?.role === 'admin';
+            const attendees = event.attendees || [];
             const myStatus = isAdmin
-              ? event.attendees.find(a => a.uid === user.uid)?.status
-              : event.attendees.find(a => a.name === userProfile?.name)?.status;
+              ? (user?.uid ? attendees.find(a => a.uid === user.uid)?.status : undefined)
+              : (userProfile?.name ? attendees.find(a => a.name === userProfile.name)?.status : undefined);
             const dateStr = event.start.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', weekday: 'short' });
             const timeStr = `${event.start.getHours()}:${String(event.start.getMinutes()).padStart(2, '0')}`;
 

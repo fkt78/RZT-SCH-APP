@@ -58,6 +58,10 @@ export default function AdminStudentPasswordPanel({ db }) {
       toast.error('パスワードを入力してください');
       return;
     }
+    if (pw.length < 6) {
+      toast.error('パスワードは6文字以上で設定してください');
+      return;
+    }
     setSaving(true);
     try {
       const hashed = await hashStudentPassword(pw);
@@ -66,6 +70,7 @@ export default function AdminStudentPasswordPanel({ db }) {
         updatedAt: serverTimestamp(),
       });
       setResetPw('');
+      setSelectedId('');
       toast.success('パスワードを更新しました（bcrypt で保存済み）');
     } catch (e) {
       toast.error('保存に失敗しました: ' + (e.message || e));
@@ -84,6 +89,10 @@ export default function AdminStudentPasswordPanel({ db }) {
     }
     if (!pw) {
       toast.error('パスワードを入力してください');
+      return;
+    }
+    if (pw.length < 6) {
+      toast.error('パスワードは6文字以上で設定してください');
       return;
     }
     setAdding(true);

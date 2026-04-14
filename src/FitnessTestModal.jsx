@@ -244,7 +244,12 @@ export default function FitnessTestModal({ personName, db, onClose }) {
           setAnalysisResult(d.analysisResult ?? null);
           setInstructorComment(d.instructorComment ?? '');
           setRhythmTraining(d.rhythmTraining && typeof d.rhythmTraining === 'object'
-            ? { q1: d.rhythmTraining.q1 ?? '', q2: d.rhythmTraining.q2 ?? '', q3: d.rhythmTraining.q3 ?? '', q4: d.rhythmTraining.q4 ?? '' }
+            ? {
+                q1: (d.rhythmTraining.q1 != null ? String(d.rhythmTraining.q1).trim() : ''),
+                q2: (d.rhythmTraining.q2 != null ? String(d.rhythmTraining.q2).trim() : ''),
+                q3: (d.rhythmTraining.q3 != null ? String(d.rhythmTraining.q3).trim() : ''),
+                q4: (d.rhythmTraining.q4 != null ? String(d.rhythmTraining.q4).trim() : ''),
+              }
             : { q1: '', q2: '', q3: '', q4: '' });
         } else {
           setRounds([{}, {}, {}, {}]);
@@ -388,8 +393,9 @@ export default function FitnessTestModal({ personName, db, onClose }) {
         msg = e.message || '入力データが不正です。';
       }
       setAnalysisResult('分析に失敗しました: ' + msg);
+    } finally {
+      setAnalysisLoading(false);
     }
-    setAnalysisLoading(false);
   };
 
   const escapeHtml = (s) => {

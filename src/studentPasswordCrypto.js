@@ -19,7 +19,8 @@ export async function verifyStudentPassword(plain, stored) {
   if (s.startsWith('$2')) {
     try {
       return await bcrypt.compare(p, s);
-    } catch {
+    } catch (err) {
+      console.error('[verifyStudentPassword] bcrypt 比較エラー:', err);
       return false;
     }
   }

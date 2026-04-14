@@ -105,14 +105,7 @@ exports.generateFitnessAnalysis = onCall(
         return null;
       });
 
-      if (res.ok && (!json || typeof json !== "object")) {
-        logger.error("OpenAI returned OK but invalid JSON body");
-        throw new HttpsError(
-          "internal",
-          "AI分析サービスからの応答を解析できませんでした。"
-        );
-      }
-
+      // HTTP エラー → 無効 JSON → OpenAI error フィールドの順で判定
       if (!res.ok) {
         const msg =
           json?.error?.message ||
@@ -123,7 +116,13 @@ exports.generateFitnessAnalysis = onCall(
           `AI分析サービスがエラーを返しました: ${msg}`
         );
       }
-
+      if (!json || typeof json !== "object") {
+        logger.error("OpenAI returned OK but invalid JSON body");
+        throw new HttpsError(
+          "internal",
+          "AI分析サービスからの応答を解析できませんでした。"
+        );
+      }
       if (json.error) {
         logger.error("OpenAI error object", json.error);
         throw new HttpsError(
