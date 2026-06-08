@@ -3,6 +3,7 @@ import { doc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { CheckCircle, MapPin, XCircle, HelpCircle, Clock, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { schedulesInWindowQuery } from '../scheduleQueryWindow';
+import JapaneseDateWithWeekday from '../japaneseDateWithWeekday';
 
 export default function CalendarView({ db, user, userProfile }) {
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -182,7 +183,7 @@ export default function CalendarView({ db, user, userProfile }) {
                         className="text-left p-3 rounded-lg border border-green-200 bg-green-50 hover:bg-green-100 transition shadow-sm"
                       >
                         <div className="text-xs text-green-700 font-bold mb-1">
-                          {event.start.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', weekday: 'short' })}{" "}
+                          <JapaneseDateWithWeekday date={event.start} />{" "}
                           {event.start.getHours()}:{String(event.start.getMinutes()).padStart(2, '0')}
                         </div>
                         <div className="font-bold text-slate-800 text-sm">{event.title}</div>
@@ -215,7 +216,7 @@ export default function CalendarView({ db, user, userProfile }) {
                       className="text-left p-3 rounded-lg border border-green-200 bg-green-50 hover:bg-green-100 transition shadow-sm"
                     >
                       <div className="text-xs text-green-700 font-bold mb-1">
-                        {event.start.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', weekday: 'short' })}{" "}
+                        <JapaneseDateWithWeekday date={event.start} />{" "}
                         {event.start.getHours()}:{String(event.start.getMinutes()).padStart(2, '0')}
                       </div>
                       <div className="font-bold text-slate-800 text-sm">{event.title}</div>
@@ -250,7 +251,7 @@ export default function CalendarView({ db, user, userProfile }) {
                       >
                         <div className="text-xs text-slate-600 font-bold mb-1 flex items-center gap-1">
                           <span className="bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded text-[10px]">終了</span>
-                          {event.start.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', weekday: 'short' })}{" "}
+                          <JapaneseDateWithWeekday date={event.start} />{" "}
                           {event.start.getHours()}:{String(event.start.getMinutes()).padStart(2, '0')}
                         </div>
                         <div className="font-bold text-slate-800 text-sm">{event.title}</div>
@@ -284,7 +285,7 @@ export default function CalendarView({ db, user, userProfile }) {
                     >
                       <div className="text-xs text-slate-600 font-bold mb-1 flex items-center gap-1">
                         <span className="bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded text-[10px]">終了</span>
-                        {event.start.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', weekday: 'short' })}{" "}
+                        <JapaneseDateWithWeekday date={event.start} />{" "}
                         {event.start.getHours()}:{String(event.start.getMinutes()).padStart(2, '0')}
                       </div>
                       <div className="font-bold text-slate-800 text-sm">{event.title}</div>
@@ -348,14 +349,14 @@ function ParticipationModal({ event, onClose, db, user, userProfile }) {
   };
 
   const timeStr = `${event.start.getHours()}:${String(event.start.getMinutes()).padStart(2,'0')} ~ ${event.end.getHours()}:${String(event.end.getMinutes()).padStart(2,'0')}`;
-  const dateStr = event.start.toLocaleDateString('ja-JP', { month: 'long', day: 'numeric', weekday: 'short' });
-
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
       <div className="bg-white w-full max-w-sm rounded-xl shadow-2xl overflow-hidden">
         <div className="bg-slate-800 text-white p-4 flex justify-between items-start">
           <div>
-            <div className="text-blue-300 text-xs font-bold mb-1">{dateStr}</div>
+            <div className="text-blue-300 text-xs font-bold mb-1">
+              <JapaneseDateWithWeekday date={event.start} weekdaySundayClassName="text-red-400" />
+            </div>
             <h3 className="text-lg font-bold">{event.title}</h3>
             <div className="text-slate-300 text-xs flex items-center gap-2 mt-1">
               <Clock size={12}/> {timeStr}

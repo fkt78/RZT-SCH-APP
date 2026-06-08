@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { doc, getDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { AlertCircle, CheckCircle, MapPin, XCircle, HelpCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
+import JapaneseDateWithWeekday from '../japaneseDateWithWeekday';
 import { schedulesInWindowQuery } from '../scheduleQueryWindow';
 
 function StatusButton({ active, onClick, icon, label, color }) {
@@ -99,7 +100,6 @@ export default function HomeBoard({ db, user, userProfile }) {
             const myStatus = isAdmin
               ? (user?.uid ? attendees.find(a => a.uid === user.uid)?.status : undefined)
               : (userProfile?.name ? attendees.find(a => a.name === userProfile.name)?.status : undefined);
-            const dateStr = event.start.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', weekday: 'short' });
             const timeStr = `${event.start.getHours()}:${String(event.start.getMinutes()).padStart(2, '0')}`;
 
             return (
@@ -107,7 +107,9 @@ export default function HomeBoard({ db, user, userProfile }) {
                 <div className="p-4 flex flex-col sm:flex-row gap-4 sm:items-center justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="bg-blue-100 text-blue-800 text-xs font-bold px-2 py-0.5 rounded">{dateStr}</span>
+                      <span className="bg-blue-100 text-blue-800 text-xs font-bold px-2 py-0.5 rounded">
+                        <JapaneseDateWithWeekday date={event.start} />
+                      </span>
                       <span className="text-xs text-slate-500 font-mono bg-slate-100 px-1.5 rounded">{timeStr}</span>
                     </div>
                     <h4 className="font-bold text-slate-800 text-lg mb-1">{event.title}</h4>
